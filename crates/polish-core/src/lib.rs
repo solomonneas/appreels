@@ -1,0 +1,1 @@
+//! appshots-style image framing.
