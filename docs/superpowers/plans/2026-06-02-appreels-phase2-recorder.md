@@ -250,10 +250,9 @@ Add to the `tests` module (needs ffmpeg + DISPLAY; run manually):
     }
 ```
 
-- [ ] **Step 6: Run the live test manually to verify capture works**
+- [x] **Step 6: Run the live test manually to verify capture works**
 
-Blocked in the current Codex session: `DISPLAY` was empty, so there was no X display for
-`ffmpeg -f x11grab` capture.
+Verified 2026-06-02 on `DISPLAY=:1`: `records_a_short_clip` passes (writes a non-empty mp4).
 
 Run: `cargo test -p appreels-capture -- --ignored records_a_short_clip`
 Expected: PASS (writes a non-empty mp4). If it fails because the display name differs,
@@ -763,10 +762,11 @@ Expected: PASS (doctor tests + parse_region tests).
 Run: `cargo build`
 Expected: clean.
 
-- [ ] **Step 9: Verify the CLI end-to-end manually (needs display + ffmpeg)**
+- [x] **Step 9: Verify the CLI end-to-end manually (needs display + ffmpeg)**
 
-Blocked in the current Codex session: `DISPLAY` was empty. The render-side live test was
-verified with ffmpeg/ffprobe; the record-side path still needs an X11 session.
+Verified 2026-06-02 on `DISPLAY=:1`: `record --region 0,0,320,240 --seconds 1` then
+`render --style-seed 42` both print `ok: true`; the framed output is 464x408 (320x240 +
+padding/shadow) with the indigo-copper backdrop, rounded corners, and soft shadow present.
 
 Run:
 ```bash
