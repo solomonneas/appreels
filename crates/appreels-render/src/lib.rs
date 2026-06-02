@@ -160,7 +160,7 @@ pub fn frame_video(
     let mut encoder = Command::new("ffmpeg")
         .args(encode_args(canvas_w, canvas_h, info.fps, output))
         .stdin(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|source| RenderError::Spawn {
             program: "ffmpeg".into(),
@@ -169,26 +169,59 @@ pub fn frame_video(
 
     let mut dec_out = decoder.stdout.take().expect("decoder stdout");
     let mut enc_in = encoder.stdin.take().expect("encoder stdin");
+    // Take the encoder's stderr so we can report its real failure cause if the
+    // write side breaks (the encoder's stdout is a file, not a pipe we own, so
+    // reading stderr after wait() cannot deadlock).
+    let mut enc_err = encoder.stderr.take();
     let frame_len = (w as usize) * (h as usize) * 4;
     let mut buf = vec![0u8; frame_len];
+
+    // Drain the encoder's captured stderr into a String.
+    let read_encoder_stderr = |enc_err: &mut Option<std::process::ChildStderr>| -> String {
+        let mut text = String::new();
+        if let Some(stderr) = enc_err.as_mut() {
+            let _ = stderr.read_to_string(&mut text);
+        }
+        text.trim().to_string()
+    };
 
     loop {
         match dec_out.read_exact(&mut buf) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(e) => return Err(RenderError::Io(e)),
+            Err(e) => {
+                let _ = decoder.kill();
+                let _ = decoder.wait();
+                let _ = encoder.wait();
+                return Err(RenderError::Io(e));
+            }
         }
         let frame = RgbaImage::from_raw(w, h, buf.clone()).expect("frame dimensions");
         let composed = compose_frame(&frame, style);
-        enc_in.write_all(composed.as_raw())?;
+        if let Err(e) = enc_in.write_all(composed.as_raw()) {
+            // The encoder likely died early; reap both children and surface the
+            // encoder's real failure cause rather than the BrokenPipe.
+            drop(enc_in);
+            let _ = decoder.kill();
+            let _ = decoder.wait();
+            let _ = encoder.wait();
+            let stderr = read_encoder_stderr(&mut enc_err);
+            if e.kind() == std::io::ErrorKind::BrokenPipe {
+                return Err(RenderError::Failed(format!(
+                    "encoder exited before all frames were written: {stderr}"
+                )));
+            }
+            return Err(RenderError::Io(e));
+        }
     }
     drop(enc_in); // signal EOF to the encoder
 
     let dec_status = decoder.wait().map_err(RenderError::Io)?;
     let enc_status = encoder.wait().map_err(RenderError::Io)?;
     if !dec_status.success() || !enc_status.success() {
+        let stderr = read_encoder_stderr(&mut enc_err);
         return Err(RenderError::Failed(format!(
-            "decoder={dec_status:?} encoder={enc_status:?}"
+            "decoder={dec_status:?} encoder={enc_status:?}: {stderr}"
         )));
     }
     Ok(info)
@@ -216,6 +249,16 @@ mod tests {
     #[test]
     fn rejects_missing_fields() {
         assert!(parse_ffprobe("width=640\n").is_none());
+    }
+
+    #[test]
+    fn rejects_zero_denominator_frame_rate() {
+        assert_eq!(parse_frame_rate("30/0"), None);
+    }
+
+    #[test]
+    fn parses_bare_integer_frame_rate() {
+        assert_eq!(parse_frame_rate("25"), Some(25.0));
     }
 
     #[test]
