@@ -19,6 +19,7 @@ pub struct ToolStatus {
 
 const REQUIRED_TOOLS: &[(&str, &str)] = &[
     ("ffmpeg", "raw capture + render"),
+    ("ffprobe", "video probing for render"),
     ("xdotool", "real-cursor input control"),
     ("wmctrl", "window geometry"),
     ("obs-cmd", "OBS live-scene capture (optional)"),
@@ -64,6 +65,12 @@ mod tests {
         assert!(!none.warnings.is_empty());
         let partial = report("0.1.0", |t| t == "ffmpeg"); // missing xdotool
         assert!(!partial.ok);
+    }
+
+    #[test]
+    fn probes_ffprobe() {
+        let r = report("0.1.0", |_| true);
+        assert!(r.tools.iter().any(|t| t.name == "ffprobe"));
     }
 
     #[test]

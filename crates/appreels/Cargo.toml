@@ -11,6 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 appreels-script = { path = "../appreels-script" }
+appreels-capture = { path = "../appreels-capture" }
+appreels-render = { path = "../appreels-render" }
+polish-core = { path = "../polish-core" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
