@@ -3,6 +3,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// The JSON schema for a [`Script`], for `appreels schema`.
+pub fn script_schema() -> schemars::schema::RootSchema {
+    schemars::schema_for!(Script)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Script {
@@ -129,5 +134,12 @@ mod tests {
         let t = Target::Browser { url: "https://x".into() };
         let v = serde_json::to_value(t).unwrap();
         assert_eq!(v["kind"], "browser");
+    }
+
+    #[test]
+    fn schema_generates() {
+        let schema = script_schema();
+        let v = serde_json::to_value(&schema).unwrap();
+        assert!(v["properties"]["steps"].is_object());
     }
 }
