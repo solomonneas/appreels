@@ -16,6 +16,17 @@ appreels doctor          # report capture/render dependency health as JSON
 appreels schema          # print the demo-script JSON schema
 ```
 
+## Recording (phase 2)
+
+```bash
+# Record a window for 5 seconds, then frame it with the appshots look:
+appreels record --window "Firefox" --display :0 --seconds 5 --out raw.mp4
+appreels render --input raw.mp4 --out demo.mp4 --style-seed 42
+
+# Or capture an explicit region:
+appreels record --region 0,0,1280,720 --display :0 --seconds 5 --out raw.mp4
+```
+
 ## License
 
 Apache-2.0.
