@@ -5,7 +5,10 @@ use clap::{Parser, Subcommand};
 use crate::doctor;
 
 #[derive(Debug, Parser)]
-#[command(name = "appreels", about = "Agent-neutral polished demo-video recorder")]
+#[command(
+    name = "appreels",
+    about = "Agent-neutral polished demo-video recorder"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,

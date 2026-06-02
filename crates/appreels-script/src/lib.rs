@@ -131,7 +131,9 @@ mod tests {
 
     #[test]
     fn target_uses_camel_case_tag() {
-        let t = Target::Browser { url: "https://x".into() };
+        let t = Target::Browser {
+            url: "https://x".into(),
+        };
         let v = serde_json::to_value(t).unwrap();
         assert_eq!(v["kind"], "browser");
     }

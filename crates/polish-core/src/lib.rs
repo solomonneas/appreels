@@ -19,8 +19,18 @@ pub type Palette = (&'static str, [u8; 3], [u8; 3], [u8; 3]);
 pub const PALETTES: [Palette; 5] = [
     ("dusk-berry", [34, 40, 78], [178, 48, 104], [118, 79, 178]),
     ("aurora-teal", [15, 77, 87], [62, 148, 126], [165, 212, 141]),
-    ("graphite-rose", [38, 42, 49], [158, 64, 91], [222, 134, 113]),
-    ("indigo-copper", [31, 45, 92], [190, 104, 62], [240, 167, 92]),
+    (
+        "graphite-rose",
+        [38, 42, 49],
+        [158, 64, 91],
+        [222, 134, 113],
+    ),
+    (
+        "indigo-copper",
+        [31, 45, 92],
+        [190, 104, 62],
+        [240, 167, 92],
+    ),
     ("forest-slate", [23, 65, 55], [73, 88, 103], [129, 160, 126]),
 ];
 
@@ -69,7 +79,12 @@ pub fn compose_frame(input: &RgbaImage, style: &PresentationStyle) -> RgbaImage 
     let mut canvas = backdrop(canvas_w, canvas_h, style);
     let shadow = shadow_layer(w, h, canvas_w, canvas_h, style);
     alpha_composite(&mut canvas, &shadow, 0, 0);
-    alpha_composite(&mut canvas, &window, style.padding as i32, style.padding as i32);
+    alpha_composite(
+        &mut canvas,
+        &window,
+        style.padding as i32,
+        style.padding as i32,
+    );
     canvas
 }
 
@@ -243,7 +258,10 @@ mod tests {
         let input = RgbaImage::from_pixel(100, 60, Rgba([10, 20, 30, 255]));
         let out = compose_frame(&input, &style);
         assert_eq!(out.width(), 100 + style.padding * 2);
-        assert_eq!(out.height(), 60 + style.padding * 2 + style.shadow_offset_y as u32);
+        assert_eq!(
+            out.height(),
+            60 + style.padding * 2 + style.shadow_offset_y as u32
+        );
     }
 
     #[test]
