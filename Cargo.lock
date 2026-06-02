@@ -64,7 +64,6 @@ version = "0.1.0"
 dependencies = [
  "appreels-script",
  "clap",
- "schemars",
  "serde",
  "serde_json",
 ]

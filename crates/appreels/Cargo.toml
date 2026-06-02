@@ -14,4 +14,3 @@ appreels-script = { path = "../appreels-script" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-schemars = { workspace = true }
