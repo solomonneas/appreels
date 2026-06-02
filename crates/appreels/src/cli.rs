@@ -49,7 +49,7 @@ pub enum Command {
         input: PathBuf,
         #[arg(long)]
         out: PathBuf,
-        /// Style seed (omit for a random style).
+        /// Style seed (omit for the default style).
         #[arg(long)]
         style_seed: Option<u64>,
     },
@@ -90,7 +90,8 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 (_, Some(spec)) => parse_region(&spec)?,
                 (None, None) => return Err("provide --window or --region".into()),
             };
-            appreels_capture::record(&display, resolved, fps, seconds, out.to_str().unwrap())?;
+            let out_str = out.to_str().ok_or("output path must be valid UTF-8")?;
+            appreels_capture::record(&display, resolved, fps, seconds, out_str)?;
             let report = serde_json::json!({
                 "ok": true,
                 "command": "record",
@@ -111,11 +112,9 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 Some(seed) => polish_core::style_from_seed(seed),
                 None => polish_core::style_from_seed(default_seed()),
             };
-            let info = appreels_render::frame_video(
-                input.to_str().unwrap(),
-                out.to_str().unwrap(),
-                &style,
-            )?;
+            let input_str = input.to_str().ok_or("input path must be valid UTF-8")?;
+            let out_str = out.to_str().ok_or("output path must be valid UTF-8")?;
+            let info = appreels_render::frame_video(input_str, out_str, &style)?;
             let report = serde_json::json!({
                 "ok": true,
                 "command": "render",
