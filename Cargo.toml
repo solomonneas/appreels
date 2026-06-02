@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/polish-core", "crates/appreels-script", "crates/appreels", "crates/appreels-capture"]
+members = ["crates/polish-core", "crates/appreels-script", "crates/appreels", "crates/appreels-capture", "crates/appreels-render"]
 
 [workspace.package]
 edition = "2024"
