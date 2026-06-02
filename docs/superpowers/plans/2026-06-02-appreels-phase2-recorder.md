@@ -39,7 +39,7 @@ CLI wires them together.
 - Create: `crates/appreels-capture/src/lib.rs`
 - Modify: `Cargo.toml` (workspace members)
 
-- [ ] **Step 1: Add the crate to the workspace + manifest**
+- [x] **Step 1: Add the crate to the workspace + manifest**
 
 In root `Cargo.toml`, add to `members`: `"crates/appreels-capture"`.
 
@@ -56,7 +56,7 @@ description = "appreels screen/window capture (ffmpeg x11grab)"
 thiserror = { workspace = true }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 `crates/appreels-capture/src/lib.rs`:
 ```rust
@@ -80,12 +80,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `cargo test -p appreels-capture`
 Expected: FAIL — `Region`, `parse_xdotool_geometry` not found.
 
-- [ ] **Step 4: Implement Region + parser**
+- [x] **Step 4: Implement Region + parser**
 
 Prepend to `crates/appreels-capture/src/lib.rs`:
 ```rust
@@ -118,12 +118,12 @@ pub fn parse_xdotool_geometry(output: &str) -> Option<Region> {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `cargo test -p appreels-capture`
 Expected: PASS (2 tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Cargo.toml crates/appreels-capture/
@@ -137,7 +137,7 @@ git commit -m "feat(capture): region type and xdotool geometry parsing"
 **Files:**
 - Modify: `crates/appreels-capture/src/lib.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to the `tests` module:
 ```rust
@@ -154,12 +154,12 @@ Add to the `tests` module:
     }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p appreels-capture`
 Expected: FAIL — `x11grab_args` not found.
 
-- [ ] **Step 3: Implement the arg builder + error type + record()**
+- [x] **Step 3: Implement the arg builder + error type + record()**
 
 Add to `crates/appreels-capture/src/lib.rs`:
 ```rust
@@ -230,12 +230,12 @@ fn run_status(program: &str, args: &[&str]) -> Result<(), CaptureError> {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -p appreels-capture`
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Add an `#[ignore]`d live recording test**
+- [x] **Step 5: Add an `#[ignore]`d live recording test**
 
 Add to the `tests` module (needs ffmpeg + DISPLAY; run manually):
 ```rust
@@ -252,11 +252,14 @@ Add to the `tests` module (needs ffmpeg + DISPLAY; run manually):
 
 - [ ] **Step 6: Run the live test manually to verify capture works**
 
+Blocked in the current Codex session: `DISPLAY` was empty, so there was no X display for
+`ffmpeg -f x11grab` capture.
+
 Run: `cargo test -p appreels-capture -- --ignored records_a_short_clip`
 Expected: PASS (writes a non-empty mp4). If it fails because the display name differs,
 set `DISPLAY` appropriately and retry.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/appreels-capture/src/lib.rs
@@ -272,7 +275,7 @@ git commit -m "feat(capture): x11grab recording and window resolution"
 - Create: `crates/appreels-render/src/lib.rs`
 - Modify: `Cargo.toml` (workspace members)
 
-- [ ] **Step 1: Add the crate to the workspace + manifest**
+- [x] **Step 1: Add the crate to the workspace + manifest**
 
 In root `Cargo.toml`, add to `members`: `"crates/appreels-render"`.
 
@@ -291,7 +294,7 @@ image = { workspace = true }
 thiserror = { workspace = true }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 `crates/appreels-render/src/lib.rs`:
 ```rust
@@ -323,12 +326,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `cargo test -p appreels-render`
 Expected: FAIL — `parse_ffprobe`, `VideoInfo` not found.
 
-- [ ] **Step 4: Implement VideoInfo + parser**
+- [x] **Step 4: Implement VideoInfo + parser**
 
 Prepend to `crates/appreels-render/src/lib.rs`:
 ```rust
@@ -369,12 +372,12 @@ fn parse_frame_rate(value: &str) -> Option<f64> {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `cargo test -p appreels-render`
 Expected: PASS (3 tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Cargo.toml crates/appreels-render/
@@ -388,7 +391,7 @@ git commit -m "feat(render): video info and ffprobe parsing"
 **Files:**
 - Modify: `crates/appreels-render/src/lib.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to the `tests` module:
 ```rust
@@ -412,12 +415,12 @@ Add to the `tests` module:
     }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p appreels-render`
 Expected: FAIL — `decode_args`, `encode_args` not found.
 
-- [ ] **Step 3: Implement the arg builders, error type, and frame_video orchestration**
+- [x] **Step 3: Implement the arg builders, error type, and frame_video orchestration**
 
 Add to `crates/appreels-render/src/lib.rs`:
 ```rust
@@ -540,12 +543,12 @@ pub fn frame_video(input: &str, output: &str, style: &PresentationStyle) -> Resu
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -p appreels-render`
 Expected: PASS (5 tests).
 
-- [ ] **Step 5: Add an `#[ignore]`d live render test**
+- [x] **Step 5: Add an `#[ignore]`d live render test**
 
 Add to the `tests` module (needs ffmpeg/ffprobe; run manually):
 ```rust
@@ -576,12 +579,12 @@ Add to the `tests` module (needs ffmpeg/ffprobe; run manually):
     }
 ```
 
-- [ ] **Step 6: Run the live render test manually**
+- [x] **Step 6: Run the live render test manually**
 
 Run: `cargo test -p appreels-render -- --ignored frames_a_generated_clip`
 Expected: PASS (renders a framed mp4 and re-probes it).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/appreels-render/src/lib.rs
@@ -597,7 +600,7 @@ git commit -m "feat(render): frame-by-frame polish-core video framing"
 - Modify: `crates/appreels/src/cli.rs`
 - Modify: `crates/appreels/src/doctor.rs`
 
-- [ ] **Step 1: Add deps**
+- [x] **Step 1: Add deps**
 
 In `crates/appreels/Cargo.toml` `[dependencies]`, add:
 ```toml
@@ -606,7 +609,7 @@ appreels-render = { path = "../appreels-render" }
 polish-core = { path = "../polish-core" }
 ```
 
-- [ ] **Step 2: Write the failing test (doctor includes ffprobe)**
+- [x] **Step 2: Write the failing test (doctor includes ffprobe)**
 
 In `crates/appreels/src/doctor.rs`, add to the `REQUIRED_TOOLS` test expectations by adding this test to its `tests` module:
 ```rust
@@ -617,12 +620,12 @@ In `crates/appreels/src/doctor.rs`, add to the `REQUIRED_TOOLS` test expectation
     }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `cargo test -p appreels`
 Expected: FAIL — no `ffprobe` entry.
 
-- [ ] **Step 4: Add ffprobe to the probe list**
+- [x] **Step 4: Add ffprobe to the probe list**
 
 In `crates/appreels/src/doctor.rs`, add to `REQUIRED_TOOLS`:
 ```rust
@@ -630,12 +633,12 @@ In `crates/appreels/src/doctor.rs`, add to `REQUIRED_TOOLS`:
 ```
 (Place it right after the `ffmpeg` entry.)
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `cargo test -p appreels`
 Expected: PASS.
 
-- [ ] **Step 6: Add the record + render subcommands**
+- [x] **Step 6: Add the record + render subcommands**
 
 In `crates/appreels/src/cli.rs`, add variants to `enum Command`:
 ```rust
@@ -732,7 +735,7 @@ fn default_seed() -> u64 {
 }
 ```
 
-- [ ] **Step 7: Write a failing test for parse_region**
+- [x] **Step 7: Write a failing test for parse_region**
 
 Add a test module section at the bottom of `cli.rs`:
 ```rust
@@ -753,7 +756,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 8: Run tests + build**
+- [x] **Step 8: Run tests + build**
 
 Run: `cargo test -p appreels`
 Expected: PASS (doctor tests + parse_region tests).
@@ -761,6 +764,9 @@ Run: `cargo build`
 Expected: clean.
 
 - [ ] **Step 9: Verify the CLI end-to-end manually (needs display + ffmpeg)**
+
+Blocked in the current Codex session: `DISPLAY` was empty. The render-side live test was
+verified with ffmpeg/ffprobe; the record-side path still needs an X11 session.
 
 Run:
 ```bash
@@ -771,7 +777,7 @@ Expected: each prints an `ok: true` JSON report; `/tmp/framed.mp4` exists and is
 larger-than-source video (the framed look). Open it to confirm the appshots backdrop +
 rounded corners + shadow are present.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add crates/appreels/
@@ -785,7 +791,7 @@ git commit -m "feat(cli): record and render subcommands"
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Document the new commands**
+- [x] **Step 1: Document the new commands**
 
 Add a section to `README.md`:
 ```markdown
@@ -801,12 +807,12 @@ appreels record --region 0,0,1280,720 --display :0 --seconds 5 --out raw.mp4
 ```
 ```
 
-- [ ] **Step 2: Verify the full gate on latest stable**
+- [x] **Step 2: Verify the full gate on latest stable**
 
 Run: `rustup update stable && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`
 Expected: fmt clean, clippy clean, all (non-ignored) tests pass.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add README.md
