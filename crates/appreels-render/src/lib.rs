@@ -1,5 +1,9 @@
 //! appreels post-render: frame recorded video with the polish-core look.
 
+mod timeline;
+
+pub use timeline::{Caption, Card, CursorSample, Timeline, ZoomCue, cursor_at, parse_cursor_track};
+
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 

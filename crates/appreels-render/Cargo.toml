@@ -9,3 +9,6 @@ description = "appreels post-render: polish-core framing of recorded video"
 polish-core = { path = "../polish-core" }
 image = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ab_glyph = "0.2"
