@@ -2,7 +2,10 @@
 
 mod timeline;
 
-pub use timeline::{Caption, Card, CursorSample, Timeline, ZoomCue, cursor_at, parse_cursor_track};
+pub use timeline::{
+    Caption, Card, CursorSample, Timeline, ZoomCue, ZoomState, caption_at, cursor_at,
+    parse_cursor_track, zoom_at,
+};
 
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};

@@ -98,6 +98,54 @@ pub fn cursor_at(samples: &[CursorSample], t_ms: f64) -> Option<(f64, f64)> {
     None
 }
 
+/// The active caption at `t_ms`, if any. `end_ms` is exclusive.
+pub fn caption_at(captions: &[Caption], t_ms: f64) -> Option<&Caption> {
+    captions
+        .iter()
+        .find(|c| t_ms >= c.start_ms as f64 && t_ms < c.end_ms as f64)
+}
+
+/// The active zoom transform at a moment: center (source px) + eased scale.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZoomState {
+    pub cx: f64,
+    pub cy: f64,
+    pub scale: f64,
+}
+
+/// The eased zoom state at `t_ms`. Overlapping cues: last one wins. Scale ramps
+/// up over the first 30% of the cue, holds, and ramps down over the last 30%.
+pub fn zoom_at(zooms: &[ZoomCue], t_ms: f64) -> Option<ZoomState> {
+    let cue = zooms
+        .iter()
+        .rev()
+        .find(|z| t_ms >= z.start_ms as f64 && t_ms < z.end_ms as f64)?;
+    let span = (cue.end_ms.saturating_sub(cue.start_ms)).max(1) as f64;
+    let p = ((t_ms - cue.start_ms as f64) / span).clamp(0.0, 1.0);
+    let ramp = 0.3_f64;
+    let factor = if p < ramp {
+        ease_in_out(p / ramp)
+    } else if p > 1.0 - ramp {
+        ease_in_out((1.0 - p) / ramp)
+    } else {
+        1.0
+    };
+    Some(ZoomState {
+        cx: cue.x,
+        cy: cue.y,
+        scale: 1.0 + (cue.scale - 1.0) * factor,
+    })
+}
+
+fn ease_in_out(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.5 {
+        2.0 * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(2) / 2.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +219,44 @@ mod tests {
         assert_eq!(cursor_at(&samples, 0.0), Some((5.0, 5.0)));
         assert_eq!(cursor_at(&samples, 999.0), Some((9.0, 9.0)));
         assert_eq!(cursor_at(&[], 5.0), None);
+    }
+
+    #[test]
+    fn caption_at_selects_the_active_caption() {
+        let caps = vec![
+            Caption {
+                start_ms: 0,
+                end_ms: 1000,
+                text: "a".into(),
+            },
+            Caption {
+                start_ms: 1000,
+                end_ms: 2000,
+                text: "b".into(),
+            },
+        ];
+        assert_eq!(caption_at(&caps, 500.0).unwrap().text, "a");
+        assert_eq!(caption_at(&caps, 1000.0).unwrap().text, "b"); // end is exclusive
+        assert!(caption_at(&caps, 5000.0).is_none());
+    }
+
+    #[test]
+    fn zoom_at_ramps_up_holds_and_ramps_down() {
+        let zooms = vec![ZoomCue {
+            start_ms: 0,
+            end_ms: 1000,
+            x: 50.0,
+            y: 60.0,
+            scale: 2.0,
+        }];
+        // Middle (hold): full scale.
+        let mid = zoom_at(&zooms, 500.0).unwrap();
+        assert!((mid.scale - 2.0).abs() < 1e-6);
+        assert_eq!((mid.cx, mid.cy), (50.0, 60.0));
+        // Very start: barely zoomed (close to 1.0).
+        let start = zoom_at(&zooms, 1.0).unwrap();
+        assert!(start.scale >= 1.0 && start.scale < 1.2);
+        // Outside the cue: none.
+        assert!(zoom_at(&zooms, 2000.0).is_none());
     }
 }
