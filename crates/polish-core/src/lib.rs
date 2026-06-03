@@ -76,7 +76,7 @@ pub fn compose_frame(input: &RgbaImage, style: &PresentationStyle) -> RgbaImage 
     let canvas_w = w + style.padding * 2;
     let canvas_h = h + style.padding * 2 + style.shadow_offset_y as u32;
 
-    let mut canvas = backdrop(canvas_w, canvas_h, style);
+    let mut canvas = gradient_backdrop(canvas_w, canvas_h, style);
     let shadow = shadow_layer(w, h, canvas_w, canvas_h, style);
     alpha_composite(&mut canvas, &shadow, 0, 0);
     alpha_composite(
@@ -167,7 +167,8 @@ fn shadow_layer(
     imageops::blur(&mask, style.shadow_blur)
 }
 
-fn backdrop(width: u32, height: u32, style: &PresentationStyle) -> RgbaImage {
+/// Render the appshots gradient backdrop at the given size. Pure, opaque.
+pub fn gradient_backdrop(width: u32, height: u32, style: &PresentationStyle) -> RgbaImage {
     ImageBuffer::from_fn(width, height, |x, y| {
         let fx = x as f32 / width.max(1) as f32;
         let fy = y as f32 / height.max(1) as f32;
@@ -270,5 +271,14 @@ mod tests {
         let input = RgbaImage::from_pixel(40, 40, Rgba([255, 255, 255, 255]));
         let out = compose_frame(&input, &style);
         assert_eq!(out.get_pixel(0, 0).0[3], 255); // backdrop corner is opaque
+    }
+
+    #[test]
+    fn gradient_backdrop_is_sized_and_opaque() {
+        let style = style_from_seed(42);
+        let bg = gradient_backdrop(120, 80, &style);
+        assert_eq!(bg.dimensions(), (120, 80));
+        assert_eq!(bg.get_pixel(0, 0).0[3], 255);
+        assert_eq!(bg.get_pixel(119, 79).0[3], 255);
     }
 }
