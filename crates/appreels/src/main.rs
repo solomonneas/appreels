@@ -9,7 +9,13 @@ fn main() -> ExitCode {
     match cli::run(cli::Cli::parse()) {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("appreels: {err}");
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "ok": false,
+                    "error": err.to_string(),
+                })
+            );
             ExitCode::from(1)
         }
     }

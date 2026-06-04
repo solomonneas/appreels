@@ -71,21 +71,56 @@ const SHADOW_ALPHA: u8 = 95;
 /// Frame a single image with the appshots look: gradient backdrop, rounded
 /// corners, soft shadow, padding. Pure and deterministic.
 pub fn compose_frame(input: &RgbaImage, style: &PresentationStyle) -> RgbaImage {
-    let window = rounded_window(input, style.corner_radius);
-    let (w, h) = window.dimensions();
-    let canvas_w = w + style.padding * 2;
-    let canvas_h = h + style.padding * 2 + style.shadow_offset_y as u32;
+    FrameComposer::new(input.width(), input.height(), style).compose(input)
+}
 
-    let mut canvas = gradient_backdrop(canvas_w, canvas_h, style);
-    let shadow = shadow_layer(w, h, canvas_w, canvas_h, style);
-    alpha_composite(&mut canvas, &shadow, 0, 0);
-    alpha_composite(
-        &mut canvas,
-        &window,
-        style.padding as i32,
-        style.padding as i32,
-    );
-    canvas
+/// Reusable appshots-style frame compositor for a fixed source size and style.
+///
+/// This precomputes the static gradient backdrop and blurred shadow so video
+/// rendering does not redo that work for every frame.
+#[derive(Debug, Clone)]
+pub struct FrameComposer {
+    style: PresentationStyle,
+    source_w: u32,
+    source_h: u32,
+    template: RgbaImage,
+}
+
+impl FrameComposer {
+    pub fn new(source_w: u32, source_h: u32, style: &PresentationStyle) -> Self {
+        let canvas_w = source_w + style.padding * 2;
+        let canvas_h = source_h + style.padding * 2 + style.shadow_offset_y as u32;
+        let mut template = gradient_backdrop(canvas_w, canvas_h, style);
+        let shadow = shadow_layer(source_w, source_h, canvas_w, canvas_h, style);
+        alpha_composite(&mut template, &shadow, 0, 0);
+        FrameComposer {
+            style: style.clone(),
+            source_w,
+            source_h,
+            template,
+        }
+    }
+
+    pub fn canvas_dimensions(&self) -> (u32, u32) {
+        self.template.dimensions()
+    }
+
+    pub fn compose(&self, input: &RgbaImage) -> RgbaImage {
+        assert_eq!(
+            input.dimensions(),
+            (self.source_w, self.source_h),
+            "input frame dimensions must match the composer"
+        );
+        let window = rounded_window(input, self.style.corner_radius);
+        let mut canvas = self.template.clone();
+        alpha_composite(
+            &mut canvas,
+            &window,
+            self.style.padding as i32,
+            self.style.padding as i32,
+        );
+        canvas
+    }
 }
 
 fn rounded_window(input: &RgbaImage, radius: u32) -> RgbaImage {
@@ -271,6 +306,17 @@ mod tests {
         let input = RgbaImage::from_pixel(40, 40, Rgba([255, 255, 255, 255]));
         let out = compose_frame(&input, &style);
         assert_eq!(out.get_pixel(0, 0).0[3], 255); // backdrop corner is opaque
+    }
+
+    #[test]
+    fn frame_composer_matches_compose_frame() {
+        let style = style_from_seed(7);
+        let input = RgbaImage::from_pixel(40, 40, Rgba([255, 255, 255, 255]));
+        let composer = FrameComposer::new(input.width(), input.height(), &style);
+        let composed = composer.compose(&input);
+        let one_shot = compose_frame(&input, &style);
+        assert_eq!(composer.canvas_dimensions(), one_shot.dimensions());
+        assert_eq!(composed, one_shot);
     }
 
     #[test]

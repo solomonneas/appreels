@@ -1,7 +1,12 @@
 //! appreels post-render: frame recorded video with the polish-core look.
 
+mod cards;
+mod effects;
+mod text;
 mod timeline;
 
+pub use cards::render_card;
+pub use effects::{ZoomTransform, apply_zoom, draw_caption, draw_cursor_ring};
 pub use timeline::{
     Caption, Card, CursorSample, Timeline, ZoomCue, ZoomState, caption_at, cursor_at,
     parse_cursor_track, zoom_at,
@@ -11,8 +16,10 @@ use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
 use image::RgbaImage;
-use polish_core::{PresentationStyle, compose_frame};
+use polish_core::{FrameComposer, PresentationStyle};
 use thiserror::Error;
+
+use text::font as load_font;
 
 /// Basic properties of a video stream.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -117,6 +124,10 @@ pub fn encode_args(canvas_w: u32, canvas_h: u32, fps: f64, output: &str) -> Vec<
         format!("{fps:.5}"),
         "-i".into(),
         "-".into(),
+        "-c:v".into(),
+        "libx264".into(),
+        "-preset".into(),
+        "ultrafast".into(),
         "-vf".into(),
         "pad=ceil(iw/2)*2:ceil(ih/2)*2".into(),
         "-pix_fmt".into(),
@@ -143,17 +154,64 @@ pub fn probe(input: &str) -> Result<VideoInfo, RenderError> {
         .ok_or_else(|| RenderError::Probe("missing stream fields".into()))
 }
 
+/// Number of frames a card of `ms` lasts at `fps`.
+pub fn card_frame_count(ms: u32, fps: f64) -> u32 {
+    ((f64::from(ms) * fps) / 1000.0).round() as u32
+}
+
+/// Summary of a timeline-aware render.
+#[derive(Debug, Clone)]
+pub struct RenderOutcome {
+    pub info: VideoInfo,
+    pub warnings: Vec<String>,
+    pub captions: usize,
+    pub zooms: usize,
+    pub cursor_track_used: bool,
+    pub title_card: bool,
+    pub outro_card: bool,
+}
+
 /// Decode `input`, frame each frame through `compose_frame`, and re-encode to `output`.
+/// This is the backwards-compatible no-effects render.
 pub fn frame_video(
     input: &str,
     output: &str,
     style: &PresentationStyle,
 ) -> Result<VideoInfo, RenderError> {
+    render_video(input, output, style, &Timeline::default(), None).map(|outcome| outcome.info)
+}
+
+/// Decode `input`, apply timeline effects, and re-encode to `output`.
+pub fn render_video(
+    input: &str,
+    output: &str,
+    style: &PresentationStyle,
+    timeline: &Timeline,
+    cursor_track_path: Option<&str>,
+) -> Result<RenderOutcome, RenderError> {
     let info = probe(input)?;
     let (w, h) = (info.width, info.height);
-    // compose_frame canvas size for this input + style.
     let canvas_w = w + style.padding * 2;
     let canvas_h = h + style.padding * 2 + style.shadow_offset_y as u32;
+    let composer = FrameComposer::new(w, h, style);
+    let font = load_font();
+    let mut warnings = Vec::new();
+    let track_path = cursor_track_path
+        .map(str::to_string)
+        .or_else(|| timeline.cursor_track.clone());
+    let cursor_samples = match &track_path {
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(text) => parse_cursor_track(&text),
+            Err(e) => {
+                warnings.push(format!(
+                    "cursor track {path:?} unreadable: {e}; ring skipped"
+                ));
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+    let cursor_track_used = !cursor_samples.is_empty();
 
     let mut decoder = Command::new("ffmpeg")
         .args(decode_args(input))
@@ -183,7 +241,6 @@ pub fn frame_video(
     let frame_len = (w as usize) * (h as usize) * 4;
     let mut buf = vec![0u8; frame_len];
 
-    // Drain the encoder's captured stderr into a String.
     let read_encoder_stderr = |enc_err: &mut Option<std::process::ChildStderr>| -> String {
         let mut text = String::new();
         if let Some(stderr) = enc_err.as_mut() {
@@ -192,6 +249,34 @@ pub fn frame_video(
         text.trim().to_string()
     };
 
+    macro_rules! write_frame {
+        ($canvas:expr) => {{
+            let canvas: RgbaImage = $canvas;
+            if let Err(e) = enc_in.write_all(canvas.as_raw()) {
+                drop(enc_in);
+                let _ = decoder.kill();
+                let _ = decoder.wait();
+                let _ = encoder.wait();
+                let stderr = read_encoder_stderr(&mut enc_err);
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    return Err(RenderError::Failed(format!(
+                        "encoder exited before all frames were written: {stderr}"
+                    )));
+                }
+                return Err(RenderError::Io(e));
+            }
+        }};
+    }
+
+    let has_title = timeline.title_card.is_some();
+    if let Some(card) = &timeline.title_card {
+        let frame = cards::render_card(canvas_w, canvas_h, &card.text, style);
+        for _ in 0..card_frame_count(card.ms, info.fps) {
+            write_frame!(frame.clone());
+        }
+    }
+
+    let mut frame_index: u64 = 0;
     loop {
         match dec_out.read_exact(&mut buf) {
             Ok(()) => {}
@@ -203,22 +288,29 @@ pub fn frame_video(
                 return Err(RenderError::Io(e));
             }
         }
-        let frame = RgbaImage::from_raw(w, h, buf.clone()).expect("frame dimensions");
-        let composed = compose_frame(&frame, style);
-        if let Err(e) = enc_in.write_all(composed.as_raw()) {
-            // The encoder likely died early; reap both children and surface the
-            // encoder's real failure cause rather than the BrokenPipe.
-            drop(enc_in);
-            let _ = decoder.kill();
-            let _ = decoder.wait();
-            let _ = encoder.wait();
-            let stderr = read_encoder_stderr(&mut enc_err);
-            if e.kind() == std::io::ErrorKind::BrokenPipe {
-                return Err(RenderError::Failed(format!(
-                    "encoder exited before all frames were written: {stderr}"
-                )));
-            }
-            return Err(RenderError::Io(e));
+        let t_ms = (frame_index as f64) * 1000.0 / info.fps;
+        let frame = RgbaImage::from_vec(w, h, buf.clone()).expect("frame dimensions");
+        let (mut working, xform) = match zoom_at(&timeline.zooms, t_ms) {
+            Some(z) => apply_zoom(&frame, z),
+            None => (frame, ZoomTransform::identity()),
+        };
+        if let Some((cx, cy)) = cursor_at(&cursor_samples, t_ms) {
+            let (rx, ry) = xform.map(cx, cy);
+            draw_cursor_ring(&mut working, rx, ry, style.accent);
+        }
+        let mut composed = composer.compose(&working);
+        if let Some(caption) = caption_at(&timeline.captions, t_ms) {
+            draw_caption(&mut composed, &font, &caption.text, style.accent);
+        }
+        write_frame!(composed);
+        frame_index += 1;
+    }
+
+    let has_outro = timeline.outro_card.is_some();
+    if let Some(card) = &timeline.outro_card {
+        let frame = cards::render_card(canvas_w, canvas_h, &card.text, style);
+        for _ in 0..card_frame_count(card.ms, info.fps) {
+            write_frame!(frame.clone());
         }
     }
     drop(enc_in); // signal EOF to the encoder
@@ -231,7 +323,15 @@ pub fn frame_video(
             "decoder={dec_status:?} encoder={enc_status:?}: {stderr}"
         )));
     }
-    Ok(info)
+    Ok(RenderOutcome {
+        info,
+        warnings,
+        captions: timeline.captions.len(),
+        zooms: timeline.zooms.len(),
+        cursor_track_used,
+        title_card: has_title,
+        outro_card: has_outro,
+    })
 }
 
 #[cfg(test)]
@@ -291,12 +391,18 @@ mod tests {
     }
 
     #[test]
+    fn card_frame_count_rounds_to_fps() {
+        assert_eq!(card_frame_count(1000, 30.0), 30);
+        assert_eq!(card_frame_count(1500, 30.0), 45);
+        assert_eq!(card_frame_count(0, 30.0), 0);
+    }
+
+    #[test]
     #[ignore = "needs ffmpeg/ffprobe"]
-    fn frames_a_generated_clip() {
+    fn renders_a_clip_with_effects() {
         let dir = std::env::temp_dir();
         let src = dir.join("appreels-render-src.mp4");
         let out = dir.join("appreels-render-out.mp4");
-        // Generate a 1s 320x240 test clip.
         let status = std::process::Command::new("ffmpeg")
             .args([
                 "-y",
@@ -315,11 +421,40 @@ mod tests {
         assert!(status.success());
 
         let style = polish_core::style_from_seed(42);
-        let info =
-            frame_video(src.to_str().unwrap(), out.to_str().unwrap(), &style).expect("render");
-        assert_eq!((info.width, info.height), (320, 240));
+        let timeline = Timeline {
+            title_card: Some(Card {
+                text: "Demo".into(),
+                ms: 500,
+            }),
+            outro_card: Some(Card {
+                text: "Thanks".into(),
+                ms: 500,
+            }),
+            captions: vec![Caption {
+                start_ms: 0,
+                end_ms: 600,
+                text: "hello".into(),
+            }],
+            zooms: vec![ZoomCue {
+                start_ms: 200,
+                end_ms: 800,
+                x: 160.0,
+                y: 120.0,
+                scale: 1.6,
+            }],
+            ..Default::default()
+        };
+        let outcome = render_video(
+            src.to_str().unwrap(),
+            out.to_str().unwrap(),
+            &style,
+            &timeline,
+            None,
+        )
+        .expect("render");
+        assert_eq!((outcome.info.width, outcome.info.height), (320, 240));
+        assert_eq!(outcome.captions, 1);
 
-        // Output should be larger than the input region and valid.
         let probed = probe(out.to_str().unwrap()).expect("probe out");
         assert!(probed.width >= 320 + style.padding * 2);
     }

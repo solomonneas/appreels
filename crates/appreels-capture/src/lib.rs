@@ -1,6 +1,8 @@
 //! appreels screen/window capture.
 
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
@@ -39,6 +41,23 @@ pub fn parse_xdotool_geometry(output: &str) -> Option<Region> {
     })
 }
 
+/// Parse the output of `xdotool getmouselocation --shell` into screen pixels.
+pub fn parse_mouse_location(output: &str) -> Option<(i32, i32)> {
+    let mut x = None;
+    let mut y = None;
+    for line in output.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "X" => x = value.trim().parse().ok(),
+            "Y" => y = value.trim().parse().ok(),
+            _ => {}
+        }
+    }
+    Some((x?, y?))
+}
+
 #[derive(Debug, Error)]
 pub enum CaptureError {
     #[error("failed to run `{program}`: {source}")]
@@ -66,6 +85,8 @@ pub fn x11grab_args(
 ) -> Vec<String> {
     vec![
         "-y".to_string(),
+        "-v".to_string(),
+        "error".to_string(),
         "-f".to_string(),
         "x11grab".to_string(),
         "-framerate".to_string(),
@@ -112,6 +133,71 @@ pub fn record(
     )
 }
 
+/// Record like [`record`], while polling the pointer into a JSONL cursor track.
+pub fn record_with_cursor(
+    display: &str,
+    region: Region,
+    fps: u32,
+    seconds: f64,
+    output: &str,
+    cursor_output: &str,
+) -> Result<(), CaptureError> {
+    let args = x11grab_args(display, region, fps, seconds, output);
+    let mut child = Command::new("ffmpeg")
+        .args(args.iter().map(String::as_str).collect::<Vec<_>>())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| CaptureError::Spawn {
+            program: "ffmpeg".to_string(),
+            source,
+        })?;
+
+    let mut file = std::fs::File::create(cursor_output).map_err(|source| CaptureError::Spawn {
+        program: cursor_output.to_string(),
+        source,
+    })?;
+    let start = Instant::now();
+    let mut status = None;
+
+    while status.is_none() {
+        status = child.try_wait().map_err(|source| CaptureError::Spawn {
+            program: "ffmpeg".to_string(),
+            source,
+        })?;
+        if status.is_some() {
+            break;
+        }
+        if let Ok(out) = Command::new("xdotool")
+            .args(["getmouselocation", "--shell"])
+            .env("DISPLAY", display)
+            .output()
+            && out.status.success()
+            && let Some((sx, sy)) = parse_mouse_location(&String::from_utf8_lossy(&out.stdout))
+        {
+            let t_ms = start.elapsed().as_millis();
+            let (rx, ry) = (sx - region.x, sy - region.y);
+            let _ = writeln!(file, "{{\"tMs\":{t_ms},\"x\":{rx},\"y\":{ry}}}");
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    }
+
+    let status = status.expect("ffmpeg status");
+    if !status.success() {
+        let mut stderr = String::new();
+        if let Some(mut err) = child.stderr.take() {
+            let _ = std::io::Read::read_to_string(&mut err, &mut stderr);
+        }
+        return Err(CaptureError::Failed {
+            program: "ffmpeg".to_string(),
+            status,
+            stderr: stderr.trim().to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn run(program: &str, args: &[&str]) -> Result<String, CaptureError> {
     let out = Command::new(program)
         .args(args)
@@ -131,18 +217,18 @@ fn run(program: &str, args: &[&str]) -> Result<String, CaptureError> {
 }
 
 fn run_status(program: &str, args: &[&str]) -> Result<(), CaptureError> {
-    let status = Command::new(program)
+    let out = Command::new(program)
         .args(args)
-        .status()
+        .output()
         .map_err(|source| CaptureError::Spawn {
             program: program.to_string(),
             source,
         })?;
-    if !status.success() {
+    if !out.status.success() {
         return Err(CaptureError::Failed {
             program: program.to_string(),
-            status,
-            stderr: String::new(),
+            status: out.status,
+            stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
         });
     }
     Ok(())
@@ -170,6 +256,17 @@ mod tests {
     #[test]
     fn rejects_incomplete_geometry() {
         assert!(parse_xdotool_geometry("X=1\nY=2\n").is_none());
+    }
+
+    #[test]
+    fn parses_mouse_location_shell() {
+        let out = "X=512\nY=384\nSCREEN=0\nWINDOW=12345\n";
+        assert_eq!(parse_mouse_location(out), Some((512, 384)));
+    }
+
+    #[test]
+    fn rejects_incomplete_mouse_location() {
+        assert!(parse_mouse_location("X=1\n").is_none());
     }
 
     #[test]
@@ -202,5 +299,35 @@ mod tests {
         };
         record(&display, region, 10, 1.0, out.to_str().unwrap()).expect("record");
         assert!(out.metadata().expect("file").len() > 0);
+    }
+
+    #[test]
+    #[ignore = "needs ffmpeg, xdotool, and an X display"]
+    fn records_a_clip_with_cursor_track() {
+        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+        let dir = std::env::temp_dir();
+        let video = dir.join("appreels-capture-cursor.mp4");
+        let track = dir.join("appreels-capture-cursor.jsonl");
+        let region = Region {
+            x: 0,
+            y: 0,
+            width: 320,
+            height: 240,
+        };
+        record_with_cursor(
+            &display,
+            region,
+            10,
+            1.0,
+            video.to_str().unwrap(),
+            track.to_str().unwrap(),
+        )
+        .expect("record");
+        assert!(video.metadata().expect("video").len() > 0);
+        let text = std::fs::read_to_string(&track).expect("track");
+        assert!(
+            text.lines().any(|l| l.contains("\"tMs\"")),
+            "expected cursor samples"
+        );
     }
 }
