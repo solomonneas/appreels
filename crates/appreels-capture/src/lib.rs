@@ -101,6 +101,8 @@ pub fn x11grab_args(
         "libx264".to_string(),
         "-preset".to_string(),
         "ultrafast".to_string(),
+        "-vf".to_string(),
+        "pad=ceil(iw/2)*2:ceil(ih/2)*2".to_string(),
         "-pix_fmt".to_string(),
         "yuv420p".to_string(),
         output.to_string(),
@@ -114,8 +116,13 @@ pub fn resolve_window(title: &str) -> Result<Region, CaptureError> {
         .lines()
         .next()
         .ok_or_else(|| CaptureError::WindowNotFound(title.to_string()))?;
+    resolve_window_id(id)
+}
+
+/// Resolve a window's screen rect from a concrete xdotool window id.
+pub fn resolve_window_id(id: &str) -> Result<Region, CaptureError> {
     let geom = run("xdotool", &["getwindowgeometry", "--shell", id])?;
-    parse_xdotool_geometry(&geom).ok_or_else(|| CaptureError::WindowNotFound(title.to_string()))
+    parse_xdotool_geometry(&geom).ok_or_else(|| CaptureError::WindowNotFound(id.to_string()))
 }
 
 /// Record a region of the X display to `output` for `seconds`, via ffmpeg x11grab.
@@ -283,6 +290,10 @@ mod tests {
         assert!(args.windows(2).any(|w| w == ["-i", ":1+10,20"]));
         assert!(args.windows(2).any(|w| w == ["-t", "2.500"]));
         assert!(args.windows(2).any(|w| w == ["-framerate", "30"]));
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"])
+        );
         assert_eq!(args.last().unwrap(), "/tmp/out.mp4");
     }
 

@@ -58,6 +58,50 @@ relative to the captured region. `render` uses `--cursor-track` when supplied,
 then `cursorTrack` from the cue file, then auto-discovers `<input>.cursor.jsonl`
 when present.
 
+## Terminal demos
+
+`perform-terminal` launches a real terminal, replays a JSON plan with `xdotool`,
+records the exact terminal window, generates render cues, and writes a polished
+demo video:
+
+```bash
+appreels perform-terminal --script terminal-demo.json --out demo.mp4 --display :0
+```
+
+Example `terminal-demo.json`:
+
+```json
+{
+  "title": "Terminal showcase",
+  "cols": 100,
+  "rows": 28,
+  "startupMs": 900,
+  "tailMs": 700,
+  "typeDelayMs": 28,
+  "outro": "Done",
+  "steps": [
+    {
+      "type": "run",
+      "command": "echo hello",
+      "waitMs": 1200,
+      "caption": "Type and run the command",
+      "focus": "output"
+    },
+    {
+      "type": "wait",
+      "ms": 1500,
+      "caption": "Watch the generated output",
+      "focus": "output"
+    }
+  ]
+}
+```
+
+Supported terminal steps are `caption`, `type`, `run`, `key`, `wait`, and `zoom`.
+Focus values are `input`, `output`, `center`, `full`, or explicit coordinates as
+`{ "coord": { "x": 420, "y": 240 } }`. `run` automatically zooms toward the input
+while typing and toward output while waiting.
+
 ## License
 
 Apache-2.0.
