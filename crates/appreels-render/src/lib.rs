@@ -8,8 +8,8 @@ mod timeline;
 pub use cards::render_card;
 pub use effects::{ZoomTransform, apply_zoom, draw_caption, draw_cursor_ring};
 pub use timeline::{
-    Caption, Card, CursorSample, Timeline, ZoomCue, ZoomState, caption_at, cursor_at,
-    parse_cursor_track, zoom_at,
+    Caption, CaptionPosition, Card, CursorSample, Timeline, ZoomCue, ZoomState, caption_at,
+    cursor_at, parse_cursor_track, zoom_at,
 };
 
 use std::io::{Read, Write};
@@ -300,7 +300,13 @@ pub fn render_video(
         }
         let mut composed = composer.compose(&working);
         if let Some(caption) = caption_at(&timeline.captions, t_ms) {
-            draw_caption(&mut composed, &font, &caption.text, style.accent);
+            draw_caption(
+                &mut composed,
+                &font,
+                &caption.text,
+                style.accent,
+                caption.position,
+            );
         }
         write_frame!(composed);
         frame_index += 1;
@@ -434,6 +440,7 @@ mod tests {
                 start_ms: 0,
                 end_ms: 600,
                 text: "hello".into(),
+                position: CaptionPosition::Bottom,
             }],
             zooms: vec![ZoomCue {
                 start_ms: 200,

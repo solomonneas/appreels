@@ -5,12 +5,12 @@
   "width": 1180,
   "height": 760,
   "position": { "x": 95, "y": 75 },
-  "startupMs": 1800,
-  "tailMs": 1600,
-  "typeDelayMs": 45,
-  "settleMs": 650,
-  "moveMs": 680,
-  "zoomScale": 1.07,
+  "startupMs": 2100,
+  "tailMs": 2300,
+  "typeDelayMs": 78,
+  "settleMs": 1100,
+  "moveMs": 1050,
+  "zoomScale": 1.30,
   "outro": "Browser flow complete",
   "outroCardMs": 1300,
   "steps": [
@@ -18,11 +18,13 @@
       "type": "click",
       "x": 465,
       "y": 175,
+      "holdMs": 550,
       "caption": "Click into the project field"
     },
     {
       "type": "type",
       "text": "Launch Kit",
+      "msPerChar": 84,
       "caption": "Type the project name",
       "focus": { "coord": { "x": 540, "y": 175 } }
     },
@@ -30,11 +32,12 @@
       "type": "click",
       "x": 980,
       "y": 175,
+      "holdMs": 550,
       "caption": "Create the project"
     },
     {
       "type": "wait",
-      "ms": 1500,
+      "ms": 2300,
       "caption": "The app confirms the new project",
       "focus": { "coord": { "x": 610, "y": 300 } }
     },
@@ -42,11 +45,12 @@
       "type": "click",
       "x": 165,
       "y": 155,
+      "holdMs": 550,
       "caption": "Open analytics"
     },
     {
       "type": "wait",
-      "ms": 1700,
+      "ms": 2500,
       "caption": "Review the updated metrics",
       "focus": { "coord": { "x": 650, "y": 300 } }
     }

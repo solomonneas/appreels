@@ -4,7 +4,7 @@ use ab_glyph::FontRef;
 use image::{RgbaImage, imageops};
 
 use crate::text::{blend_pixel, draw_text};
-use crate::timeline::ZoomState;
+use crate::timeline::{CaptionPosition, ZoomState};
 
 const RING_RADIUS: f64 = 14.0;
 const RING_THICKNESS: f64 = 3.0;
@@ -82,12 +82,24 @@ pub fn draw_cursor_ring(img: &mut RgbaImage, cx: f64, cy: f64, accent: [u8; 3]) 
     }
 }
 
-/// Draw the default lower-third caption: scrim, accent keyline, bold text.
-pub fn draw_caption(img: &mut RgbaImage, font: &FontRef<'static>, text: &str, accent: [u8; 3]) {
+/// Draw a caption bar: scrim, accent keyline, bold text.
+pub fn draw_caption(
+    img: &mut RgbaImage,
+    font: &FontRef<'static>,
+    text: &str,
+    accent: [u8; 3],
+    position: CaptionPosition,
+) {
     let (w, h) = img.dimensions();
-    let bar_h = ((h as f32) * 0.14) as u32;
+    let bar_h = match position {
+        CaptionPosition::Top => ((h as f32) * 0.10) as u32,
+        CaptionPosition::Bottom => ((h as f32) * 0.14) as u32,
+    };
     let margin = ((h as f32) * 0.06) as u32;
-    let bar_top = h.saturating_sub(bar_h + margin);
+    let bar_top = match position {
+        CaptionPosition::Top => 0,
+        CaptionPosition::Bottom => h.saturating_sub(bar_h + margin),
+    };
     let bar_bottom = (bar_top + bar_h).min(h);
 
     for y in bar_top..bar_bottom {
@@ -176,9 +188,31 @@ mod tests {
     fn caption_bar_darkens_lower_third_and_draws_keyline() {
         let f = crate::text::font();
         let mut img = RgbaImage::from_pixel(320, 240, Rgba([255, 255, 255, 255]));
-        draw_caption(&mut img, &f, "Open the menu", [240, 167, 92]);
+        draw_caption(
+            &mut img,
+            &f,
+            "Open the menu",
+            [240, 167, 92],
+            CaptionPosition::Bottom,
+        );
         assert_eq!(img.get_pixel(10, 10).0, [255, 255, 255, 255]);
         let darkened = (160..230).any(|y| img.get_pixel(160, y).0[0] < 200);
         assert!(darkened, "expected a darkened caption band");
+    }
+
+    #[test]
+    fn top_caption_does_not_cover_lower_third() {
+        let f = crate::text::font();
+        let mut img = RgbaImage::from_pixel(320, 240, Rgba([255, 255, 255, 255]));
+        draw_caption(
+            &mut img,
+            &f,
+            "Open the menu",
+            [240, 167, 92],
+            CaptionPosition::Top,
+        );
+        let top_darkened = (2..22).any(|y| img.get_pixel(160, y).0[0] < 200);
+        assert!(top_darkened, "expected a darkened top caption band");
+        assert_eq!(img.get_pixel(160, 220).0, [255, 255, 255, 255]);
     }
 }

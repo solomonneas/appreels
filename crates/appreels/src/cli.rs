@@ -128,9 +128,9 @@ const DEFAULT_TERMINAL_TAIL_MS: u32 = 1800;
 const DEFAULT_TYPE_DELAY_MS: u32 = 55;
 const DEFAULT_STEP_SETTLE_MS: u32 = 600;
 const DEFAULT_STAGE_MARGIN: i32 = 72;
-const DEFAULT_ZOOM_SCALE: f64 = 1.08;
-const DEFAULT_INPUT_ZOOM_SCALE: f64 = 1.10;
-const DEFAULT_OUTPUT_ZOOM_SCALE: f64 = 1.07;
+const DEFAULT_ZOOM_SCALE: f64 = 1.25;
+const DEFAULT_INPUT_ZOOM_SCALE: f64 = 1.55;
+const DEFAULT_OUTPUT_ZOOM_SCALE: f64 = 1.35;
 const DEFAULT_BROWSER_WIDTH: u32 = 1180;
 const DEFAULT_BROWSER_HEIGHT: u32 = 760;
 const DEFAULT_BROWSER_STARTUP_MS: u32 = 1800;
@@ -711,7 +711,7 @@ impl BrowserDemo {
     }
 
     fn zoom_scale(&self) -> f64 {
-        self.zoom_scale.unwrap_or(1.08)
+        self.zoom_scale.unwrap_or(1.28)
     }
 
     fn position(&self) -> TerminalPosition {
@@ -789,7 +789,13 @@ impl BrowserStep {
                 focus,
             } => {
                 let duration = duration_ms.unwrap_or(1600);
-                add_caption(timeline, t, duration, text);
+                add_caption(
+                    timeline,
+                    t,
+                    duration,
+                    text,
+                    appreels_render::CaptionPosition::Bottom,
+                );
                 add_browser_focus_zoom(
                     timeline,
                     t,
@@ -811,7 +817,13 @@ impl BrowserStep {
                     + hold_ms.unwrap_or(450)
                     + demo.settle_ms();
                 if let Some(text) = caption {
-                    add_caption(timeline, t, duration, text);
+                    add_caption(
+                        timeline,
+                        t,
+                        duration,
+                        text,
+                        appreels_render::CaptionPosition::Bottom,
+                    );
                 }
                 let focus = focus
                     .as_ref()
@@ -836,7 +848,13 @@ impl BrowserStep {
                     type_duration_ms(text, ms_per_char.unwrap_or_else(|| demo.type_delay_ms()))
                         + demo.settle_ms();
                 if let Some(text) = caption {
-                    add_caption(timeline, t, duration, text);
+                    add_caption(
+                        timeline,
+                        t,
+                        duration,
+                        text,
+                        appreels_render::CaptionPosition::Bottom,
+                    );
                 }
                 add_browser_focus_zoom(
                     timeline,
@@ -855,7 +873,13 @@ impl BrowserStep {
             } => {
                 let duration = hold_ms.unwrap_or(450) + demo.settle_ms();
                 if let Some(text) = caption {
-                    add_caption(timeline, t, duration, text);
+                    add_caption(
+                        timeline,
+                        t,
+                        duration,
+                        text,
+                        appreels_render::CaptionPosition::Bottom,
+                    );
                 }
                 add_browser_focus_zoom(
                     timeline,
@@ -876,7 +900,13 @@ impl BrowserStep {
                     + hold_ms.unwrap_or(600)
                     + demo.settle_ms();
                 if let Some(text) = caption {
-                    add_caption(timeline, t, duration, text);
+                    add_caption(
+                        timeline,
+                        t,
+                        duration,
+                        text,
+                        appreels_render::CaptionPosition::Bottom,
+                    );
                 }
                 add_browser_focus_zoom(
                     timeline,
@@ -889,7 +919,13 @@ impl BrowserStep {
             }
             BrowserStep::Wait { ms, caption, focus } => {
                 if let Some(text) = caption {
-                    add_caption(timeline, t, *ms, text);
+                    add_caption(
+                        timeline,
+                        t,
+                        *ms,
+                        text,
+                        appreels_render::CaptionPosition::Bottom,
+                    );
                 }
                 add_browser_focus_zoom(timeline, t, *ms, focus.as_ref(), region, demo.zoom_scale());
             }
@@ -1037,7 +1073,13 @@ impl TerminalStep {
                 focus,
             } => {
                 let duration = duration_ms.unwrap_or(1800);
-                add_caption(timeline, t, duration, text);
+                add_caption(
+                    timeline,
+                    t,
+                    duration,
+                    text,
+                    appreels_render::CaptionPosition::Top,
+                );
                 add_focus_zoom(
                     timeline,
                     t,
@@ -1057,7 +1099,13 @@ impl TerminalStep {
                     type_duration_ms(text, ms_per_char.unwrap_or_else(|| demo.type_delay_ms()))
                         + demo.settle_ms();
                 if let Some(text) = caption {
-                    add_caption(timeline, t, duration, text);
+                    add_caption(
+                        timeline,
+                        t,
+                        duration,
+                        text,
+                        appreels_render::CaptionPosition::Top,
+                    );
                 }
                 add_focus_zoom(
                     timeline,
@@ -1080,7 +1128,13 @@ impl TerminalStep {
                 let wait = wait_ms.unwrap_or(2400);
                 let duration = type_ms + wait + demo.settle_ms();
                 if let Some(text) = caption {
-                    add_caption(timeline, t, duration, text);
+                    add_caption(
+                        timeline,
+                        t,
+                        duration,
+                        text,
+                        appreels_render::CaptionPosition::Top,
+                    );
                 }
                 add_focus_zoom(
                     timeline,
@@ -1107,7 +1161,13 @@ impl TerminalStep {
             } => {
                 let duration = hold_ms.unwrap_or(500) + demo.settle_ms();
                 if let Some(text) = caption {
-                    add_caption(timeline, t, duration, text);
+                    add_caption(
+                        timeline,
+                        t,
+                        duration,
+                        text,
+                        appreels_render::CaptionPosition::Top,
+                    );
                 }
                 add_focus_zoom(
                     timeline,
@@ -1120,7 +1180,13 @@ impl TerminalStep {
             }
             TerminalStep::Wait { ms, caption, focus } => {
                 if let Some(text) = caption {
-                    add_caption(timeline, t, *ms, text);
+                    add_caption(
+                        timeline,
+                        t,
+                        *ms,
+                        text,
+                        appreels_render::CaptionPosition::Top,
+                    );
                 }
                 add_focus_zoom(
                     timeline,
@@ -1154,6 +1220,7 @@ fn add_caption(
     start_ms: u32,
     duration_ms: u32,
     text: &str,
+    position: appreels_render::CaptionPosition,
 ) {
     if text.trim().is_empty() || duration_ms == 0 {
         return;
@@ -1162,6 +1229,7 @@ fn add_caption(
         start_ms,
         end_ms: start_ms.saturating_add(duration_ms),
         text: text.to_string(),
+        position,
     });
 }
 
@@ -1217,8 +1285,8 @@ fn focus_point(focus: &TerminalFocus, region: appreels_capture::Region) -> (f64,
     let w = f64::from(region.width);
     let h = f64::from(region.height);
     match focus {
-        TerminalFocus::Input => (w * 0.48, h * 0.82),
-        TerminalFocus::Output => (w * 0.50, h * 0.42),
+        TerminalFocus::Input => (w * 0.30, h * 0.82),
+        TerminalFocus::Output => (w * 0.34, h * 0.42),
         TerminalFocus::Full | TerminalFocus::Center => (w * 0.50, h * 0.50),
         TerminalFocus::Coord { x, y } => (*x, *y),
     }
@@ -1733,6 +1801,7 @@ fn parse_caption_flag(spec: &str) -> Result<appreels_render::Caption, Box<dyn st
         start_ms,
         end_ms,
         text,
+        position: appreels_render::CaptionPosition::Bottom,
     })
 }
 

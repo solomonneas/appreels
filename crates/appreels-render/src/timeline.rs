@@ -33,6 +33,17 @@ pub struct Caption {
     pub start_ms: u32,
     pub end_ms: u32,
     pub text: String,
+    #[serde(default)]
+    pub position: CaptionPosition,
+}
+
+/// Where to place a caption bar on the output canvas.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CaptionPosition {
+    Top,
+    #[default]
+    Bottom,
 }
 
 /// A zoom toward `(x, y)` (source-window px) at `scale`, eased in/hold/out.
@@ -113,28 +124,79 @@ pub struct ZoomState {
     pub scale: f64,
 }
 
-/// The eased zoom state at `t_ms`. Overlapping cues: last one wins. Scale ramps
-/// up over the first 30% of the cue, holds, and ramps down over the last 30%.
+/// The eased zoom state at `t_ms`. Overlapping cues: last one wins. Adjacent
+/// cues transition camera target to camera target instead of returning to the
+/// full-window view between actions.
 pub fn zoom_at(zooms: &[ZoomCue], t_ms: f64) -> Option<ZoomState> {
-    let cue = zooms
+    let (idx, cue) = zooms
         .iter()
+        .enumerate()
         .rev()
-        .find(|z| t_ms >= z.start_ms as f64 && t_ms < z.end_ms as f64)?;
+        .find(|(_, z)| t_ms >= z.start_ms as f64 && t_ms < z.end_ms as f64)?;
     let span = (cue.end_ms.saturating_sub(cue.start_ms)).max(1) as f64;
     let p = ((t_ms - cue.start_ms as f64) / span).clamp(0.0, 1.0);
-    let ramp = 0.3_f64;
-    let factor = if p < ramp {
-        ease_in_out(p / ramp)
-    } else if p > 1.0 - ramp {
-        ease_in_out((1.0 - p) / ramp)
-    } else {
-        1.0
-    };
-    Some(ZoomState {
+
+    let target = ZoomState {
         cx: cue.x,
         cy: cue.y,
-        scale: 1.0 + (cue.scale - 1.0) * factor,
+        scale: cue.scale,
+    };
+    let ramp = 0.18_f64;
+    if p < ramp {
+        let from = connected_previous_zoom(zooms, idx)
+            .map(zoom_target)
+            .unwrap_or(ZoomState {
+                cx: cue.x,
+                cy: cue.y,
+                scale: 1.0,
+            });
+        return Some(blend_zoom(from, target, ease_in_out(p / ramp)));
+    }
+    if p > 1.0 - ramp {
+        let to = connected_next_zoom(zooms, idx)
+            .map(zoom_target)
+            .unwrap_or(ZoomState {
+                cx: cue.x,
+                cy: cue.y,
+                scale: 1.0,
+            });
+        return Some(blend_zoom(
+            target,
+            to,
+            ease_in_out((p - (1.0 - ramp)) / ramp),
+        ));
+    }
+    Some(target)
+}
+
+fn connected_previous_zoom(zooms: &[ZoomCue], idx: usize) -> Option<&ZoomCue> {
+    let cue = &zooms[idx];
+    zooms[..idx].iter().rev().find(|candidate| {
+        candidate.end_ms <= cue.start_ms && cue.start_ms.saturating_sub(candidate.end_ms) <= 700
     })
+}
+
+fn connected_next_zoom(zooms: &[ZoomCue], idx: usize) -> Option<&ZoomCue> {
+    let cue = &zooms[idx];
+    zooms[idx + 1..].iter().find(|candidate| {
+        cue.end_ms <= candidate.start_ms && candidate.start_ms.saturating_sub(cue.end_ms) <= 700
+    })
+}
+
+fn zoom_target(cue: &ZoomCue) -> ZoomState {
+    ZoomState {
+        cx: cue.x,
+        cy: cue.y,
+        scale: cue.scale,
+    }
+}
+
+fn blend_zoom(from: ZoomState, to: ZoomState, t: f64) -> ZoomState {
+    ZoomState {
+        cx: from.cx + (to.cx - from.cx) * t,
+        cy: from.cy + (to.cy - from.cy) * t,
+        scale: from.scale + (to.scale - from.scale) * t,
+    }
 }
 
 fn ease_in_out(t: f64) -> f64 {
@@ -155,15 +217,25 @@ mod tests {
         let json = r#"{
             "cursorTrack": "raw.cursor.jsonl",
             "titleCard": { "text": "Hi", "ms": 1500 },
-            "captions": [ { "startMs": 0, "endMs": 1800, "text": "Open the menu" } ],
+            "captions": [ { "startMs": 0, "endMs": 1800, "text": "Open the menu", "position": "top" } ],
             "zooms": [ { "startMs": 2000, "endMs": 5000, "x": 420, "y": 300, "scale": 1.8 } ]
         }"#;
         let tl = Timeline::from_json(json).expect("parse");
         assert_eq!(tl.cursor_track.as_deref(), Some("raw.cursor.jsonl"));
         assert_eq!(tl.title_card.as_ref().unwrap().ms, 1500);
         assert_eq!(tl.captions[0].text, "Open the menu");
+        assert_eq!(tl.captions[0].position, CaptionPosition::Top);
         assert_eq!(tl.zooms[0].scale, 1.8);
         assert!(tl.outro_card.is_none());
+    }
+
+    #[test]
+    fn caption_position_defaults_to_bottom() {
+        let tl = Timeline::from_json(
+            r#"{ "captions": [ { "startMs": 0, "endMs": 1000, "text": "Default" } ] }"#,
+        )
+        .expect("parse");
+        assert_eq!(tl.captions[0].position, CaptionPosition::Bottom);
     }
 
     #[test]
@@ -228,11 +300,13 @@ mod tests {
                 start_ms: 0,
                 end_ms: 1000,
                 text: "a".into(),
+                position: CaptionPosition::Bottom,
             },
             Caption {
                 start_ms: 1000,
                 end_ms: 2000,
                 text: "b".into(),
+                position: CaptionPosition::Bottom,
             },
         ];
         assert_eq!(caption_at(&caps, 500.0).unwrap().text, "a");
@@ -258,5 +332,29 @@ mod tests {
         assert!(start.scale >= 1.0 && start.scale < 1.2);
         // Outside the cue: none.
         assert!(zoom_at(&zooms, 2000.0).is_none());
+    }
+
+    #[test]
+    fn adjacent_zoom_cues_transition_without_zooming_out() {
+        let zooms = vec![
+            ZoomCue {
+                start_ms: 0,
+                end_ms: 1000,
+                x: 50.0,
+                y: 60.0,
+                scale: 1.8,
+            },
+            ZoomCue {
+                start_ms: 1000,
+                end_ms: 2000,
+                x: 140.0,
+                y: 180.0,
+                scale: 1.7,
+            },
+        ];
+        let before_cut = zoom_at(&zooms, 995.0).unwrap();
+        let after_cut = zoom_at(&zooms, 1005.0).unwrap();
+        assert!(before_cut.scale > 1.65);
+        assert!(after_cut.scale > 1.65);
     }
 }

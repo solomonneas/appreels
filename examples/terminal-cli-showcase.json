@@ -1,50 +1,50 @@
 {
   "title": "appreels CLI workflow",
-  "cols": 104,
-  "rows": 30,
+  "cols": 86,
+  "rows": 24,
   "position": { "x": 130, "y": 105 },
   "stage": false,
   "stageMargin": 96,
-  "startupMs": 1500,
-  "tailMs": 1700,
-  "typeDelayMs": 38,
-  "settleMs": 650,
-  "zoomScale": 1.035,
-  "inputZoomScale": 1.055,
-  "outputZoomScale": 1.04,
+  "startupMs": 1900,
+  "tailMs": 2400,
+  "typeDelayMs": 72,
+  "settleMs": 1050,
+  "zoomScale": 1.22,
+  "inputZoomScale": 1.62,
+  "outputZoomScale": 1.28,
   "outro": "Ready to share",
   "outroCardMs": 1300,
   "steps": [
     {
       "type": "caption",
       "text": "Start with a quick health check",
-      "durationMs": 1300,
-      "focus": "center"
+      "durationMs": 1800,
+      "focus": "full"
     },
     {
       "type": "run",
       "command": "./target/debug/appreels doctor",
-      "waitMs": 2200,
+      "waitMs": 3400,
       "caption": "Check recorder and renderer dependencies",
       "focus": "output"
     },
     {
       "type": "run",
-      "command": "./target/debug/appreels schema --compact | head -c 260; printf '\\n'",
-      "waitMs": 2300,
+      "command": "./target/debug/appreels schema --compact | head -c 190; printf '\\n'",
+      "waitMs": 3400,
       "caption": "Inspect the machine-readable script contract",
       "focus": "output"
     },
     {
       "type": "run",
       "command": "./target/debug/appreels render --help | sed -n '1,18p'",
-      "waitMs": 2400,
+      "waitMs": 3600,
       "caption": "Discover effect flags for a polished render",
       "focus": "output"
     },
     {
       "type": "wait",
-      "ms": 1500,
+      "ms": 2400,
       "caption": "Multiple CLI commands, captured in one clean take",
       "focus": "output"
     }
