@@ -113,6 +113,59 @@ a black stage window behind the terminal and places the terminal at a stable scr
 position, so semi-transparent terminal profiles do not leak whatever was behind the
 window into the recording.
 
+The repo includes a ready-to-run multi-command CLI showcase:
+
+```bash
+appreels perform-terminal \
+  --script examples/terminal-cli-showcase.json \
+  --out terminal-cli-showcase.mp4 \
+  --display :0
+```
+
+## Browser demos
+
+`perform-browser` launches a fresh Chrome app window, records that exact browser
+window, replays paced real-cursor actions, and renders the final video with the
+same cue pipeline:
+
+```bash
+appreels perform-browser --script browser-demo.json --out browser-demo.mp4 --display :0
+```
+
+Example `browser-demo.json`:
+
+```json
+{
+  "title": "Browser workflow demo",
+  "windowTitle": "Browser action showcase",
+  "url": "examples/browser-actions-showcase.html",
+  "width": 1180,
+  "height": 760,
+  "position": { "x": 95, "y": 75 },
+  "startupMs": 1800,
+  "tailMs": 1600,
+  "moveMs": 680,
+  "zoomScale": 1.07,
+  "steps": [
+    { "type": "click", "x": 465, "y": 175, "caption": "Click into the project field" },
+    { "type": "type", "text": "Launch Kit", "caption": "Type the project name" },
+    { "type": "click", "x": 980, "y": 175, "caption": "Create the project" }
+  ]
+}
+```
+
+Supported browser steps are `caption`, `click`, `type`, `key`, `scroll`, `wait`,
+and `zoom`. Browser focus values are `center`, `full`, or explicit coordinates as
+`{ "coord": { "x": 420, "y": 240 } }`. The bundled example page and script can be
+run directly:
+
+```bash
+appreels perform-browser \
+  --script examples/browser-actions-showcase.json \
+  --out browser-actions-showcase.mp4 \
+  --display :0
+```
+
 ## License
 
 Apache-2.0.

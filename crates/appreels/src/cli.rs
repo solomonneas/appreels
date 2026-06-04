@@ -96,6 +96,29 @@ pub enum Command {
         #[arg(long)]
         keep_open: bool,
     },
+    /// Replay a browser demo script, record it, and render a polished video.
+    PerformBrowser {
+        /// Browser demo script JSON.
+        #[arg(long)]
+        script: PathBuf,
+        /// Final rendered video output path.
+        #[arg(long)]
+        out: PathBuf,
+        /// Raw browser recording path. Defaults to <out>.raw.mp4.
+        #[arg(long)]
+        raw_out: Option<PathBuf>,
+        /// X display to use for launching, acting, and recording.
+        #[arg(long, default_value = ":0")]
+        display: String,
+        #[arg(long, default_value_t = 30)]
+        fps: u32,
+        /// Style seed (omit for the default style).
+        #[arg(long)]
+        style_seed: Option<u64>,
+        /// Keep the launched browser window open after recording.
+        #[arg(long)]
+        keep_open: bool,
+    },
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -108,6 +131,11 @@ const DEFAULT_STAGE_MARGIN: i32 = 72;
 const DEFAULT_ZOOM_SCALE: f64 = 1.08;
 const DEFAULT_INPUT_ZOOM_SCALE: f64 = 1.10;
 const DEFAULT_OUTPUT_ZOOM_SCALE: f64 = 1.07;
+const DEFAULT_BROWSER_WIDTH: u32 = 1180;
+const DEFAULT_BROWSER_HEIGHT: u32 = 760;
+const DEFAULT_BROWSER_STARTUP_MS: u32 = 1800;
+const DEFAULT_BROWSER_TAIL_MS: u32 = 1600;
+const DEFAULT_BROWSER_MOVE_MS: u32 = 650;
 
 pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
     match cli.command {
@@ -287,6 +315,7 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 None
             };
             activate_window(&display, &terminal.window_id)?;
+            park_mouse(&display, region)?;
 
             let timeline = terminal_script.to_timeline(region);
             let duration_ms = terminal_script.estimated_source_ms();
@@ -334,11 +363,7 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 out.to_str().ok_or("output path must be valid UTF-8")?,
                 &style,
                 &timeline,
-                Some(
-                    cursor_track
-                        .to_str()
-                        .ok_or("cursor track path must be valid UTF-8")?,
-                ),
+                None,
             )?;
             let report = serde_json::json!({
                 "ok": true,
@@ -349,6 +374,108 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 "cues": cues,
                 "terminalTitle": terminal.title,
                 "stageWindow": stage.as_ref().map(|s| s.title.clone()),
+                "region": { "x": region.x, "y": region.y, "width": region.width, "height": region.height },
+                "styleSeed": style.seed,
+                "palette": style.palette_name,
+                "source": {
+                    "width": outcome.info.width,
+                    "height": outcome.info.height,
+                    "fps": outcome.info.fps,
+                },
+                "effects": {
+                    "captions": outcome.captions,
+                    "zooms": outcome.zooms,
+                    "cursorTrackUsed": outcome.cursor_track_used,
+                    "titleCard": outcome.title_card,
+                    "outroCard": outcome.outro_card,
+                },
+                "warnings": outcome.warnings,
+            });
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::PerformBrowser {
+            script,
+            out,
+            raw_out,
+            display,
+            fps,
+            style_seed,
+            keep_open,
+        } => {
+            let style = match style_seed {
+                Some(seed) => polish_core::style_from_seed(seed),
+                None => polish_core::style_from_seed(default_seed()),
+            };
+            let browser_script = BrowserDemo::from_json(&std::fs::read_to_string(&script)?)?;
+            let raw = raw_out.unwrap_or_else(|| raw_demo_path(&out));
+            let cursor_track = default_cursor_track(&raw);
+            let cues = raw.with_extension("cues.json");
+
+            let browser = launch_browser(&display, &browser_script)?;
+            place_window(&display, &browser.window_id, browser_script.position())?;
+            let region = appreels_capture::resolve_window_id(&browser.window_id)?;
+            activate_window(&display, &browser.window_id)?;
+            park_mouse(&display, region)?;
+
+            let timeline = browser_script.to_timeline(region);
+            let duration_ms = browser_script.estimated_source_ms();
+            let record_seconds = f64::from(duration_ms) / 1000.0;
+            let display_for_record = display.clone();
+            let raw_for_record = raw.clone();
+            let track_for_record = cursor_track.clone();
+            let raw_for_record_str = raw_for_record
+                .to_str()
+                .ok_or("raw output path must be valid UTF-8")?
+                .to_string();
+            let track_for_record_str = track_for_record
+                .to_str()
+                .ok_or("cursor track path must be valid UTF-8")?
+                .to_string();
+            let record_handle = std::thread::spawn(move || {
+                appreels_capture::record_with_cursor(
+                    &display_for_record,
+                    region,
+                    fps,
+                    record_seconds,
+                    &raw_for_record_str,
+                    &track_for_record_str,
+                )
+            });
+
+            std::thread::sleep(Duration::from_millis(u64::from(
+                browser_script.startup_ms().max(150),
+            )));
+            perform_browser_steps(&display, &browser.window_id, region, &browser_script)?;
+            record_handle
+                .join()
+                .map_err(|_| "recording thread panicked")??;
+
+            std::fs::write(&cues, serde_json::to_string_pretty(&timeline)?)?;
+            if !keep_open {
+                let _ = close_window(&display, &browser.window_id);
+                let _ = std::fs::remove_dir_all(&browser.user_data_dir);
+            }
+
+            let outcome = appreels_render::render_video(
+                raw.to_str().ok_or("raw output path must be valid UTF-8")?,
+                out.to_str().ok_or("output path must be valid UTF-8")?,
+                &style,
+                &timeline,
+                Some(
+                    cursor_track
+                        .to_str()
+                        .ok_or("cursor track path must be valid UTF-8")?,
+                ),
+            )?;
+            let report = serde_json::json!({
+                "ok": true,
+                "command": "performBrowser",
+                "output": out,
+                "rawOutput": raw,
+                "cursorTrack": cursor_track,
+                "cues": cues,
+                "browserTitle": browser.title,
                 "region": { "x": region.x, "y": region.y, "width": region.width, "height": region.height },
                 "styleSeed": style.seed,
                 "palette": style.palette_name,
@@ -462,6 +589,332 @@ struct LaunchedTerminal {
 struct StageWindow {
     title: String,
     window_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct BrowserWindow {
+    title: String,
+    window_id: String,
+    user_data_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserDemo {
+    title: Option<String>,
+    window_title: Option<String>,
+    url: String,
+    width: Option<u32>,
+    height: Option<u32>,
+    position: Option<TerminalPosition>,
+    startup_ms: Option<u32>,
+    tail_ms: Option<u32>,
+    settle_ms: Option<u32>,
+    type_delay_ms: Option<u32>,
+    move_ms: Option<u32>,
+    title_card_ms: Option<u32>,
+    outro_card_ms: Option<u32>,
+    outro: Option<String>,
+    zoom_scale: Option<f64>,
+    steps: Vec<BrowserStep>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum BrowserStep {
+    Caption {
+        text: String,
+        duration_ms: Option<u32>,
+        focus: Option<BrowserFocus>,
+    },
+    Click {
+        x: f64,
+        y: f64,
+        caption: Option<String>,
+        focus: Option<BrowserFocus>,
+        hold_ms: Option<u32>,
+        move_ms: Option<u32>,
+    },
+    Type {
+        text: String,
+        ms_per_char: Option<u32>,
+        caption: Option<String>,
+        focus: Option<BrowserFocus>,
+    },
+    Key {
+        chord: String,
+        caption: Option<String>,
+        hold_ms: Option<u32>,
+        focus: Option<BrowserFocus>,
+    },
+    Scroll {
+        clicks: i32,
+        caption: Option<String>,
+        focus: Option<BrowserFocus>,
+        hold_ms: Option<u32>,
+    },
+    Wait {
+        ms: u32,
+        caption: Option<String>,
+        focus: Option<BrowserFocus>,
+    },
+    Zoom {
+        focus: BrowserFocus,
+        scale: Option<f64>,
+        duration_ms: Option<u32>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum BrowserFocus {
+    Full,
+    Center,
+    Coord { x: f64, y: f64 },
+}
+
+impl BrowserDemo {
+    fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(s)
+    }
+
+    fn title(&self) -> String {
+        self.title.clone().unwrap_or_else(|| "Browser demo".into())
+    }
+
+    fn window_title(&self) -> String {
+        self.window_title.clone().unwrap_or_else(|| self.title())
+    }
+
+    fn width(&self) -> u32 {
+        self.width.unwrap_or(DEFAULT_BROWSER_WIDTH)
+    }
+
+    fn height(&self) -> u32 {
+        self.height.unwrap_or(DEFAULT_BROWSER_HEIGHT)
+    }
+
+    fn startup_ms(&self) -> u32 {
+        self.startup_ms.unwrap_or(DEFAULT_BROWSER_STARTUP_MS)
+    }
+
+    fn tail_ms(&self) -> u32 {
+        self.tail_ms.unwrap_or(DEFAULT_BROWSER_TAIL_MS)
+    }
+
+    fn settle_ms(&self) -> u32 {
+        self.settle_ms.unwrap_or(DEFAULT_STEP_SETTLE_MS)
+    }
+
+    fn move_ms(&self) -> u32 {
+        self.move_ms.unwrap_or(DEFAULT_BROWSER_MOVE_MS)
+    }
+
+    fn zoom_scale(&self) -> f64 {
+        self.zoom_scale.unwrap_or(1.08)
+    }
+
+    fn position(&self) -> TerminalPosition {
+        self.position.unwrap_or(TerminalPosition { x: 80, y: 70 })
+    }
+
+    fn estimated_source_ms(&self) -> u32 {
+        self.startup_ms()
+            + self.steps.iter().map(|s| s.estimated_ms(self)).sum::<u32>()
+            + self.tail_ms()
+    }
+
+    fn to_timeline(&self, region: appreels_capture::Region) -> appreels_render::Timeline {
+        let mut timeline = appreels_render::Timeline {
+            title_card: Some(appreels_render::Card {
+                text: self.title(),
+                ms: self.title_card_ms.unwrap_or(900),
+            }),
+            outro_card: self.outro.as_ref().map(|text| appreels_render::Card {
+                text: text.clone(),
+                ms: self.outro_card_ms.unwrap_or(900),
+            }),
+            ..Default::default()
+        };
+        let mut t = self.startup_ms();
+        for step in &self.steps {
+            step.add_cues(&mut timeline, t, self, region);
+            t += step.estimated_ms(self);
+        }
+        timeline
+    }
+}
+
+impl BrowserStep {
+    fn estimated_ms(&self, demo: &BrowserDemo) -> u32 {
+        match self {
+            BrowserStep::Caption { duration_ms, .. } => {
+                duration_ms.unwrap_or(1600) + demo.settle_ms()
+            }
+            BrowserStep::Click {
+                move_ms, hold_ms, ..
+            } => {
+                move_ms.unwrap_or_else(|| demo.move_ms())
+                    + hold_ms.unwrap_or(450)
+                    + demo.settle_ms()
+            }
+            BrowserStep::Type {
+                text, ms_per_char, ..
+            } => {
+                type_duration_ms(text, ms_per_char.unwrap_or_else(|| demo.type_delay_ms()))
+                    + demo.settle_ms()
+            }
+            BrowserStep::Key { hold_ms, .. } => hold_ms.unwrap_or(450) + demo.settle_ms(),
+            BrowserStep::Scroll {
+                clicks, hold_ms, ..
+            } => {
+                clicks.unsigned_abs().saturating_mul(90) + hold_ms.unwrap_or(600) + demo.settle_ms()
+            }
+            BrowserStep::Wait { ms, .. } => *ms,
+            BrowserStep::Zoom { duration_ms, .. } => duration_ms.unwrap_or(1600),
+        }
+    }
+
+    fn add_cues(
+        &self,
+        timeline: &mut appreels_render::Timeline,
+        t: u32,
+        demo: &BrowserDemo,
+        region: appreels_capture::Region,
+    ) {
+        match self {
+            BrowserStep::Caption {
+                text,
+                duration_ms,
+                focus,
+            } => {
+                let duration = duration_ms.unwrap_or(1600);
+                add_caption(timeline, t, duration, text);
+                add_browser_focus_zoom(
+                    timeline,
+                    t,
+                    duration,
+                    focus.as_ref(),
+                    region,
+                    demo.zoom_scale(),
+                );
+            }
+            BrowserStep::Click {
+                x,
+                y,
+                caption,
+                focus,
+                move_ms,
+                hold_ms,
+            } => {
+                let duration = move_ms.unwrap_or_else(|| demo.move_ms())
+                    + hold_ms.unwrap_or(450)
+                    + demo.settle_ms();
+                if let Some(text) = caption {
+                    add_caption(timeline, t, duration, text);
+                }
+                let focus = focus
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or(BrowserFocus::Coord { x: *x, y: *y });
+                add_browser_focus_zoom(
+                    timeline,
+                    t,
+                    duration,
+                    Some(&focus),
+                    region,
+                    demo.zoom_scale(),
+                );
+            }
+            BrowserStep::Type {
+                text,
+                ms_per_char,
+                caption,
+                focus,
+            } => {
+                let duration =
+                    type_duration_ms(text, ms_per_char.unwrap_or_else(|| demo.type_delay_ms()))
+                        + demo.settle_ms();
+                if let Some(text) = caption {
+                    add_caption(timeline, t, duration, text);
+                }
+                add_browser_focus_zoom(
+                    timeline,
+                    t,
+                    duration,
+                    focus.as_ref(),
+                    region,
+                    demo.zoom_scale(),
+                );
+            }
+            BrowserStep::Key {
+                caption,
+                hold_ms,
+                focus,
+                ..
+            } => {
+                let duration = hold_ms.unwrap_or(450) + demo.settle_ms();
+                if let Some(text) = caption {
+                    add_caption(timeline, t, duration, text);
+                }
+                add_browser_focus_zoom(
+                    timeline,
+                    t,
+                    duration,
+                    focus.as_ref(),
+                    region,
+                    demo.zoom_scale(),
+                );
+            }
+            BrowserStep::Scroll {
+                clicks,
+                caption,
+                focus,
+                hold_ms,
+            } => {
+                let duration = clicks.unsigned_abs().saturating_mul(90)
+                    + hold_ms.unwrap_or(600)
+                    + demo.settle_ms();
+                if let Some(text) = caption {
+                    add_caption(timeline, t, duration, text);
+                }
+                add_browser_focus_zoom(
+                    timeline,
+                    t,
+                    duration,
+                    focus.as_ref(),
+                    region,
+                    demo.zoom_scale(),
+                );
+            }
+            BrowserStep::Wait { ms, caption, focus } => {
+                if let Some(text) = caption {
+                    add_caption(timeline, t, *ms, text);
+                }
+                add_browser_focus_zoom(timeline, t, *ms, focus.as_ref(), region, demo.zoom_scale());
+            }
+            BrowserStep::Zoom {
+                focus,
+                scale,
+                duration_ms,
+            } => {
+                add_browser_focus_zoom(
+                    timeline,
+                    t,
+                    duration_ms.unwrap_or(1600),
+                    Some(focus),
+                    region,
+                    scale.unwrap_or_else(|| demo.zoom_scale()),
+                );
+            }
+        }
+    }
+}
+
+impl BrowserDemo {
+    fn type_delay_ms(&self) -> u32 {
+        self.type_delay_ms.unwrap_or(DEFAULT_TYPE_DELAY_MS)
+    }
 }
 
 impl TerminalDemo {
@@ -736,6 +1189,30 @@ fn add_focus_zoom(
     });
 }
 
+fn add_browser_focus_zoom(
+    timeline: &mut appreels_render::Timeline,
+    start_ms: u32,
+    duration_ms: u32,
+    focus: Option<&BrowserFocus>,
+    region: appreels_capture::Region,
+    default_scale: f64,
+) {
+    let Some(focus) = focus else {
+        return;
+    };
+    if matches!(focus, BrowserFocus::Full) || duration_ms == 0 {
+        return;
+    }
+    let (x, y) = browser_focus_point(focus, region);
+    timeline.zooms.push(appreels_render::ZoomCue {
+        start_ms,
+        end_ms: start_ms.saturating_add(duration_ms),
+        x,
+        y,
+        scale: default_scale,
+    });
+}
+
 fn focus_point(focus: &TerminalFocus, region: appreels_capture::Region) -> (f64, f64) {
     let w = f64::from(region.width);
     let h = f64::from(region.height);
@@ -744,6 +1221,15 @@ fn focus_point(focus: &TerminalFocus, region: appreels_capture::Region) -> (f64,
         TerminalFocus::Output => (w * 0.50, h * 0.42),
         TerminalFocus::Full | TerminalFocus::Center => (w * 0.50, h * 0.50),
         TerminalFocus::Coord { x, y } => (*x, *y),
+    }
+}
+
+fn browser_focus_point(focus: &BrowserFocus, region: appreels_capture::Region) -> (f64, f64) {
+    let w = f64::from(region.width);
+    let h = f64::from(region.height);
+    match focus {
+        BrowserFocus::Full | BrowserFocus::Center => (w * 0.50, h * 0.50),
+        BrowserFocus::Coord { x, y } => (*x, *y),
     }
 }
 
@@ -765,21 +1251,7 @@ fn launch_terminal(
     let geometry = format!("{}x{}", demo.cols.unwrap_or(100), demo.rows.unwrap_or(28));
     let cwd = demo.cwd.clone().unwrap_or(std::env::current_dir()?);
 
-    if has_command("gnome-terminal") {
-        let mut cmd = std::process::Command::new("gnome-terminal");
-        cmd.env("DISPLAY", display)
-            .arg("--hide-menubar")
-            .arg(format!("--geometry={geometry}"))
-            .arg(format!("--title={title}"))
-            .arg(format!("--working-directory={}", cwd.to_string_lossy()))
-            .arg("--")
-            .arg("bash")
-            .arg("-lc")
-            .arg(shell)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
-    } else if has_command("xfce4-terminal") {
+    if has_command("xfce4-terminal") {
         let mut cmd = std::process::Command::new("xfce4-terminal");
         cmd.env("DISPLAY", display)
             .arg("--disable-server")
@@ -802,6 +1274,20 @@ fn launch_terminal(
             .arg("#f2f2f2")
             .arg("--command")
             .arg(&shell)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+    } else if has_command("gnome-terminal") {
+        let mut cmd = std::process::Command::new("gnome-terminal");
+        cmd.env("DISPLAY", display)
+            .arg("--hide-menubar")
+            .arg(format!("--geometry={geometry}"))
+            .arg(format!("--title={title}"))
+            .arg(format!("--working-directory={}", cwd.to_string_lossy()))
+            .arg("--")
+            .arg("bash")
+            .arg("-lc")
+            .arg(shell)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()?;
@@ -868,6 +1354,69 @@ fn launch_stage(
         &["windowsize", &window_id, &w.to_string(), &h.to_string()],
     )?;
     Ok(StageWindow { title, window_id })
+}
+
+fn launch_browser(
+    display: &str,
+    demo: &BrowserDemo,
+) -> Result<BrowserWindow, Box<dyn std::error::Error>> {
+    if !has_command("google-chrome") {
+        return Err("browser demos require google-chrome".into());
+    }
+    let title = demo.window_title();
+    let position = demo.position();
+    let url = browser_url(&demo.url)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let user_data_dir = std::env::temp_dir().join(format!(
+        "appreels-browser-profile-{}-{stamp}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&user_data_dir)?;
+
+    std::process::Command::new("google-chrome")
+        .env("DISPLAY", display)
+        .arg("--new-window")
+        .arg(format!("--app={url}"))
+        .arg(format!(
+            "--user-data-dir={}",
+            user_data_dir.to_string_lossy()
+        ))
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
+        .arg("--disable-background-networking")
+        .arg("--disable-features=Translate,AutofillServerCommunication")
+        .arg("--disable-sync")
+        .arg("--hide-scrollbars")
+        .arg(format!("--window-position={},{}", position.x, position.y))
+        .arg(format!("--window-size={},{}", demo.width(), demo.height()))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+
+    let window_id = wait_for_window(display, &title, Duration::from_secs(8))?;
+    Ok(BrowserWindow {
+        title,
+        window_id,
+        user_data_dir,
+    })
+}
+
+fn browser_url(input: &str) -> Result<String, Box<dyn std::error::Error>> {
+    if input.starts_with("http://")
+        || input.starts_with("https://")
+        || input.starts_with("file://")
+        || input.starts_with("data:")
+    {
+        return Ok(input.to_string());
+    }
+    let path = Path::new(input);
+    if path.exists() {
+        return Ok(format!("file://{}", path.canonicalize()?.to_string_lossy()));
+    }
+    Ok(input.to_string())
 }
 
 fn place_window(
@@ -980,6 +1529,80 @@ fn perform_terminal_steps(
     Ok(())
 }
 
+fn perform_browser_steps(
+    display: &str,
+    window_id: &str,
+    region: appreels_capture::Region,
+    demo: &BrowserDemo,
+) -> Result<(), Box<dyn std::error::Error>> {
+    activate_window(display, window_id)?;
+    for step in &demo.steps {
+        match step {
+            BrowserStep::Caption { duration_ms, .. } => {
+                std::thread::sleep(Duration::from_millis(u64::from(
+                    duration_ms.unwrap_or(1400),
+                )));
+            }
+            BrowserStep::Click {
+                x,
+                y,
+                hold_ms,
+                move_ms,
+                ..
+            } => {
+                smooth_mouse_move(
+                    display,
+                    region.x + *x as i32,
+                    region.y + *y as i32,
+                    move_ms.unwrap_or_else(|| demo.move_ms()),
+                )?;
+                run_xdotool(display, &["click", "--clearmodifiers", "1"])?;
+                std::thread::sleep(Duration::from_millis(u64::from(hold_ms.unwrap_or(450))));
+                park_mouse(display, region)?;
+                std::thread::sleep(Duration::from_millis(u64::from(demo.settle_ms())));
+            }
+            BrowserStep::Type {
+                text, ms_per_char, ..
+            } => {
+                type_into_terminal(
+                    display,
+                    text,
+                    ms_per_char.unwrap_or_else(|| demo.type_delay_ms()),
+                )?;
+                std::thread::sleep(Duration::from_millis(u64::from(demo.settle_ms())));
+            }
+            BrowserStep::Key { chord, hold_ms, .. } => {
+                run_xdotool(display, &["key", "--clearmodifiers", chord])?;
+                std::thread::sleep(Duration::from_millis(u64::from(
+                    hold_ms.unwrap_or(450) + demo.settle_ms(),
+                )));
+            }
+            BrowserStep::Scroll {
+                clicks, hold_ms, ..
+            } => {
+                let button = if *clicks >= 0 { "5" } else { "4" };
+                for _ in 0..clicks.unsigned_abs() {
+                    run_xdotool(display, &["click", "--clearmodifiers", button])?;
+                    std::thread::sleep(Duration::from_millis(90));
+                }
+                std::thread::sleep(Duration::from_millis(u64::from(
+                    hold_ms.unwrap_or(600) + demo.settle_ms(),
+                )));
+            }
+            BrowserStep::Wait { ms, .. } => {
+                std::thread::sleep(Duration::from_millis(u64::from(*ms)));
+            }
+            BrowserStep::Zoom { duration_ms, .. } => {
+                std::thread::sleep(Duration::from_millis(u64::from(
+                    duration_ms.unwrap_or(1200),
+                )));
+            }
+        }
+    }
+    std::thread::sleep(Duration::from_millis(u64::from(demo.tail_ms())));
+    Ok(())
+}
+
 fn type_into_terminal(
     display: &str,
     text: &str,
@@ -997,6 +1620,59 @@ fn type_into_terminal(
         ],
     )?;
     Ok(())
+}
+
+fn park_mouse(
+    display: &str,
+    region: appreels_capture::Region,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let x = (region.x - 24).max(2);
+    let y = (region.y - 24).max(2);
+    smooth_mouse_move(display, x, y, 220)
+}
+
+fn smooth_mouse_move(
+    display: &str,
+    target_x: i32,
+    target_y: i32,
+    duration_ms: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (start_x, start_y) = current_mouse_location(display).unwrap_or((target_x, target_y));
+    let steps = (duration_ms / 16).clamp(1, 48);
+    for i in 1..=steps {
+        let t = f64::from(i) / f64::from(steps);
+        let e = ease_in_out_unit(t);
+        let x = f64::from(start_x) + f64::from(target_x - start_x) * e;
+        let y = f64::from(start_y) + f64::from(target_y - start_y) * e;
+        let xs = format!("{:.0}", x);
+        let ys = format!("{:.0}", y);
+        run_xdotool(display, &["mousemove", &xs, &ys])?;
+        std::thread::sleep(Duration::from_millis(u64::from(
+            (duration_ms / steps).max(1),
+        )));
+    }
+    Ok(())
+}
+
+fn current_mouse_location(display: &str) -> Option<(i32, i32)> {
+    let out = std::process::Command::new("xdotool")
+        .env("DISPLAY", display)
+        .args(["getmouselocation", "--shell"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    appreels_capture::parse_mouse_location(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn ease_in_out_unit(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.5 {
+        2.0 * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(2) / 2.0
+    }
 }
 
 fn run_xdotool(display: &str, args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
@@ -1157,5 +1833,51 @@ mod tests {
         assert_eq!(timeline.captions.len(), 2);
         assert_eq!(timeline.zooms.len(), 2);
         assert!(timeline.zooms[0].y > timeline.zooms[1].y);
+    }
+
+    #[test]
+    fn parses_browser_demo_script() {
+        let json = r#"{
+            "title": "Browser showcase",
+            "windowTitle": "Browser showcase",
+            "url": "file:///tmp/showcase.html",
+            "startupMs": 100,
+            "tailMs": 200,
+            "steps": [
+                { "type": "click", "x": 120, "y": 220, "caption": "Open the menu" },
+                { "type": "type", "text": "demo", "caption": "Enter a value" },
+                { "type": "wait", "ms": 900, "caption": "Review the result" }
+            ]
+        }"#;
+        let demo = BrowserDemo::from_json(json).expect("script");
+        assert_eq!(demo.title(), "Browser showcase");
+        assert_eq!(demo.window_title(), "Browser showcase");
+        assert_eq!(demo.steps.len(), 3);
+        assert!(demo.estimated_source_ms() > 1000);
+    }
+
+    #[test]
+    fn browser_script_generates_click_captions_and_zooms() {
+        let json = r#"{
+            "title": "Browser showcase",
+            "url": "file:///tmp/showcase.html",
+            "startupMs": 100,
+            "tailMs": 200,
+            "steps": [
+                { "type": "click", "x": 300, "y": 180, "caption": "Choose the option" },
+                { "type": "wait", "ms": 900, "focus": { "coord": { "x": 480, "y": 260 } }, "caption": "Watch the panel update" }
+            ]
+        }"#;
+        let demo = BrowserDemo::from_json(json).expect("script");
+        let timeline = demo.to_timeline(appreels_capture::Region {
+            x: 0,
+            y: 0,
+            width: 1000,
+            height: 700,
+        });
+        assert_eq!(timeline.title_card.unwrap().text, "Browser showcase");
+        assert_eq!(timeline.captions.len(), 2);
+        assert_eq!(timeline.zooms.len(), 2);
+        assert_eq!((timeline.zooms[0].x, timeline.zooms[0].y), (300.0, 180.0));
     }
 }
