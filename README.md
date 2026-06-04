@@ -75,15 +75,23 @@ Example `terminal-demo.json`:
   "title": "Terminal showcase",
   "cols": 100,
   "rows": 28,
-  "startupMs": 900,
-  "tailMs": 700,
-  "typeDelayMs": 28,
+  "position": { "x": 120, "y": 110 },
+  "stage": true,
+  "stageMargin": 72,
+  "startupMs": 1500,
+  "tailMs": 1800,
+  "typeDelayMs": 55,
+  "settleMs": 600,
+  "zoomScale": 1.04,
+  "inputZoomScale": 1.06,
+  "outputZoomScale": 1.045,
   "outro": "Done",
+  "outroCardMs": 1600,
   "steps": [
     {
       "type": "run",
       "command": "echo hello",
-      "waitMs": 1200,
+      "waitMs": 2200,
       "caption": "Type and run the command",
       "focus": "output"
     },
@@ -100,7 +108,10 @@ Example `terminal-demo.json`:
 Supported terminal steps are `caption`, `type`, `run`, `key`, `wait`, and `zoom`.
 Focus values are `input`, `output`, `center`, `full`, or explicit coordinates as
 `{ "coord": { "x": 420, "y": 240 } }`. `run` automatically zooms toward the input
-while typing and toward output while waiting.
+while typing and toward output while waiting. By default, `perform-terminal` launches
+a black stage window behind the terminal and places the terminal at a stable screen
+position, so semi-transparent terminal profiles do not leak whatever was behind the
+window into the recording.
 
 ## License
 

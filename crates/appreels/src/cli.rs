@@ -100,10 +100,14 @@ pub enum Command {
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_CARD_MS: u32 = 1500;
-const DEFAULT_TERMINAL_STARTUP_MS: u32 = 800;
-const DEFAULT_TERMINAL_TAIL_MS: u32 = 700;
-const DEFAULT_TYPE_DELAY_MS: u32 = 28;
-const DEFAULT_STEP_SETTLE_MS: u32 = 250;
+const DEFAULT_TERMINAL_STARTUP_MS: u32 = 1500;
+const DEFAULT_TERMINAL_TAIL_MS: u32 = 1800;
+const DEFAULT_TYPE_DELAY_MS: u32 = 55;
+const DEFAULT_STEP_SETTLE_MS: u32 = 600;
+const DEFAULT_STAGE_MARGIN: i32 = 72;
+const DEFAULT_ZOOM_SCALE: f64 = 1.08;
+const DEFAULT_INPUT_ZOOM_SCALE: f64 = 1.10;
+const DEFAULT_OUTPUT_ZOOM_SCALE: f64 = 1.07;
 
 pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
     match cli.command {
@@ -271,7 +275,17 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             let cues = raw.with_extension("cues.json");
 
             let terminal = launch_terminal(&display, &terminal_script)?;
+            place_window(&display, &terminal.window_id, terminal_script.position())?;
             let region = appreels_capture::resolve_window_id(&terminal.window_id)?;
+            let stage = if terminal_script.stage() {
+                Some(launch_stage(
+                    &display,
+                    region,
+                    terminal_script.stage_margin(),
+                )?)
+            } else {
+                None
+            };
             activate_window(&display, &terminal.window_id)?;
 
             let timeline = terminal_script.to_timeline(region);
@@ -310,6 +324,9 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             std::fs::write(&cues, serde_json::to_string_pretty(&timeline)?)?;
             if !keep_open {
                 let _ = close_window(&display, &terminal.window_id);
+                if let Some(stage) = &stage {
+                    let _ = close_window(&display, &stage.window_id);
+                }
             }
 
             let outcome = appreels_render::render_video(
@@ -331,6 +348,7 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 "cursorTrack": cursor_track,
                 "cues": cues,
                 "terminalTitle": terminal.title,
+                "stageWindow": stage.as_ref().map(|s| s.title.clone()),
                 "region": { "x": region.x, "y": region.y, "width": region.width, "height": region.height },
                 "styleSeed": style.seed,
                 "palette": style.palette_name,
@@ -362,6 +380,12 @@ struct TerminalDemo {
     shell: Option<String>,
     cols: Option<u32>,
     rows: Option<u32>,
+    position: Option<TerminalPosition>,
+    stage: Option<bool>,
+    stage_margin: Option<i32>,
+    zoom_scale: Option<f64>,
+    input_zoom_scale: Option<f64>,
+    output_zoom_scale: Option<f64>,
     startup_ms: Option<u32>,
     tail_ms: Option<u32>,
     type_delay_ms: Option<u32>,
@@ -421,8 +445,21 @@ enum TerminalFocus {
     Coord { x: f64, y: f64 },
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalPosition {
+    x: i32,
+    y: i32,
+}
+
 #[derive(Debug, Clone)]
 struct LaunchedTerminal {
+    title: String,
+    window_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct StageWindow {
     title: String,
     window_id: String,
 }
@@ -452,6 +489,30 @@ impl TerminalDemo {
 
     fn settle_ms(&self) -> u32 {
         self.settle_ms.unwrap_or(DEFAULT_STEP_SETTLE_MS)
+    }
+
+    fn position(&self) -> TerminalPosition {
+        self.position.unwrap_or(TerminalPosition { x: 120, y: 110 })
+    }
+
+    fn stage(&self) -> bool {
+        self.stage.unwrap_or(true)
+    }
+
+    fn stage_margin(&self) -> i32 {
+        self.stage_margin.unwrap_or(DEFAULT_STAGE_MARGIN)
+    }
+
+    fn zoom_scale(&self) -> f64 {
+        self.zoom_scale.unwrap_or(DEFAULT_ZOOM_SCALE)
+    }
+
+    fn input_zoom_scale(&self) -> f64 {
+        self.input_zoom_scale.unwrap_or(DEFAULT_INPUT_ZOOM_SCALE)
+    }
+
+    fn output_zoom_scale(&self) -> f64 {
+        self.output_zoom_scale.unwrap_or(DEFAULT_OUTPUT_ZOOM_SCALE)
     }
 
     fn estimated_source_ms(&self) -> u32 {
@@ -485,7 +546,7 @@ impl TerminalStep {
     fn estimated_ms(&self, demo: &TerminalDemo) -> u32 {
         match self {
             TerminalStep::Caption { duration_ms, .. } => {
-                duration_ms.unwrap_or(1400) + demo.settle_ms()
+                duration_ms.unwrap_or(1800) + demo.settle_ms()
             }
             TerminalStep::Type {
                 text, ms_per_char, ..
@@ -500,12 +561,12 @@ impl TerminalStep {
                 ..
             } => {
                 type_duration_ms(command, ms_per_char.unwrap_or_else(|| demo.type_delay_ms()))
-                    + wait_ms.unwrap_or(1800)
+                    + wait_ms.unwrap_or(2400)
                     + demo.settle_ms()
             }
-            TerminalStep::Key { hold_ms, .. } => hold_ms.unwrap_or(350) + demo.settle_ms(),
+            TerminalStep::Key { hold_ms, .. } => hold_ms.unwrap_or(500) + demo.settle_ms(),
             TerminalStep::Wait { ms, .. } => *ms,
-            TerminalStep::Zoom { duration_ms, .. } => duration_ms.unwrap_or(1200),
+            TerminalStep::Zoom { duration_ms, .. } => duration_ms.unwrap_or(1800),
         }
     }
 
@@ -522,9 +583,16 @@ impl TerminalStep {
                 duration_ms,
                 focus,
             } => {
-                let duration = duration_ms.unwrap_or(1400);
+                let duration = duration_ms.unwrap_or(1800);
                 add_caption(timeline, t, duration, text);
-                add_focus_zoom(timeline, t, duration, focus.as_ref(), region, 1.16);
+                add_focus_zoom(
+                    timeline,
+                    t,
+                    duration,
+                    focus.as_ref(),
+                    region,
+                    demo.zoom_scale(),
+                );
             }
             TerminalStep::Type {
                 text,
@@ -544,7 +612,7 @@ impl TerminalStep {
                     duration,
                     focus.as_ref().or(Some(&TerminalFocus::Input)),
                     region,
-                    1.22,
+                    demo.input_zoom_scale(),
                 );
             }
             TerminalStep::Run {
@@ -556,7 +624,7 @@ impl TerminalStep {
             } => {
                 let type_ms =
                     type_duration_ms(command, ms_per_char.unwrap_or_else(|| demo.type_delay_ms()));
-                let wait = wait_ms.unwrap_or(1800);
+                let wait = wait_ms.unwrap_or(2400);
                 let duration = type_ms + wait + demo.settle_ms();
                 if let Some(text) = caption {
                     add_caption(timeline, t, duration, text);
@@ -567,7 +635,7 @@ impl TerminalStep {
                     type_ms + demo.settle_ms(),
                     Some(&TerminalFocus::Input),
                     region,
-                    1.22,
+                    demo.input_zoom_scale(),
                 );
                 add_focus_zoom(
                     timeline,
@@ -575,7 +643,7 @@ impl TerminalStep {
                     wait,
                     focus.as_ref().or(Some(&TerminalFocus::Output)),
                     region,
-                    1.18,
+                    demo.output_zoom_scale(),
                 );
             }
             TerminalStep::Key {
@@ -584,11 +652,18 @@ impl TerminalStep {
                 focus,
                 ..
             } => {
-                let duration = hold_ms.unwrap_or(350) + demo.settle_ms();
+                let duration = hold_ms.unwrap_or(500) + demo.settle_ms();
                 if let Some(text) = caption {
                     add_caption(timeline, t, duration, text);
                 }
-                add_focus_zoom(timeline, t, duration, focus.as_ref(), region, 1.12);
+                add_focus_zoom(
+                    timeline,
+                    t,
+                    duration,
+                    focus.as_ref(),
+                    region,
+                    demo.zoom_scale(),
+                );
             }
             TerminalStep::Wait { ms, caption, focus } => {
                 if let Some(text) = caption {
@@ -600,7 +675,7 @@ impl TerminalStep {
                     *ms,
                     focus.as_ref().or(Some(&TerminalFocus::Output)),
                     region,
-                    1.16,
+                    demo.output_zoom_scale(),
                 );
             }
             TerminalStep::Zoom {
@@ -611,10 +686,10 @@ impl TerminalStep {
                 add_focus_zoom(
                     timeline,
                     t,
-                    duration_ms.unwrap_or(1200),
+                    duration_ms.unwrap_or(1800),
                     Some(focus),
                     region,
-                    scale.unwrap_or(1.2),
+                    scale.unwrap_or_else(|| demo.zoom_scale()),
                 );
             }
         }
@@ -744,6 +819,73 @@ fn unique_terminal_title(base: &str) -> String {
         .map(|d| d.as_millis())
         .unwrap_or(0);
     format!("{base} - appreels-{}-{stamp}", std::process::id())
+}
+
+fn unique_stage_title() -> String {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("appreels-stage-{}-{stamp}", std::process::id())
+}
+
+fn launch_stage(
+    display: &str,
+    region: appreels_capture::Region,
+    margin: i32,
+) -> Result<StageWindow, Box<dyn std::error::Error>> {
+    if !has_command("google-chrome") {
+        return Err("clean terminal stage requires google-chrome".into());
+    }
+    let title = unique_stage_title();
+    let x = (region.x - margin).max(0);
+    let y = (region.y - margin).max(0);
+    let w = region
+        .width
+        .saturating_add((margin.max(0) as u32).saturating_mul(2));
+    let h = region
+        .height
+        .saturating_add((margin.max(0) as u32).saturating_mul(2));
+    let url = format!(
+        "data:text/html,<html><head><title>{title}</title></head><body style='margin:0;background:%2307080c;overflow:hidden'></body></html>"
+    );
+    std::process::Command::new("google-chrome")
+        .env("DISPLAY", display)
+        .arg("--new-window")
+        .arg(format!("--app={url}"))
+        .arg(format!("--window-position={x},{y}"))
+        .arg(format!("--window-size={w},{h}"))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    let window_id = wait_for_window(display, &title, Duration::from_secs(5))?;
+    run_xdotool(
+        display,
+        &["windowmove", &window_id, &x.to_string(), &y.to_string()],
+    )?;
+    run_xdotool(
+        display,
+        &["windowsize", &window_id, &w.to_string(), &h.to_string()],
+    )?;
+    Ok(StageWindow { title, window_id })
+}
+
+fn place_window(
+    display: &str,
+    window_id: &str,
+    position: TerminalPosition,
+) -> Result<(), Box<dyn std::error::Error>> {
+    run_xdotool(
+        display,
+        &[
+            "windowmove",
+            window_id,
+            &position.x.to_string(),
+            &position.y.to_string(),
+        ],
+    )?;
+    std::thread::sleep(Duration::from_millis(150));
+    Ok(())
 }
 
 fn wait_for_window(
