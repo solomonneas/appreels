@@ -137,6 +137,43 @@ const DEFAULT_BROWSER_STARTUP_MS: u32 = 1800;
 const DEFAULT_BROWSER_TAIL_MS: u32 = 1600;
 const DEFAULT_BROWSER_MOVE_MS: u32 = 650;
 
+/// Env var that opts in to recording or performing on a live user session
+/// display. Without it, displays :0 and :1 are refused.
+const LIVE_DISPLAY_OVERRIDE_ENV: &str = "APPREELS_ALLOW_LIVE_DISPLAY";
+
+/// True when `display` looks like a display hosting a real user session
+/// (display number 0 or 1, where desktop sessions live). Values that cannot
+/// be parsed are treated as live so the guard fails safe.
+fn is_live_session_display(display: &str) -> bool {
+    let Some((_, number_part)) = display.rsplit_once(':') else {
+        return true;
+    };
+    let number = number_part.split('.').next().unwrap_or("");
+    match number.parse::<u32>() {
+        Ok(n) => n <= 1,
+        Err(_) => true,
+    }
+}
+
+fn check_display_guard(display: &str, allow_live: bool) -> Result<(), String> {
+    if allow_live || !is_live_session_display(display) {
+        return Ok(());
+    }
+    Err(format!(
+        "refusing to drive display \"{display}\": it looks like a live user session. \
+Demos type, click, and manage windows on whatever display they target, which takes \
+over the desktop of anyone using it. Run demos on an isolated X server instead, e.g. \
+`Xvfb :99 -screen 0 1920x1080x24 &` (headless) or `Xephyr :99 -screen 1920x1080 &` \
+(visible window), then pass `--display :99`. If you really mean to drive this \
+display, set {LIVE_DISPLAY_OVERRIDE_ENV}=1."
+    ))
+}
+
+fn ensure_safe_display(display: &str) -> Result<(), String> {
+    let allow = std::env::var(LIVE_DISPLAY_OVERRIDE_ENV).is_ok_and(|v| v == "1");
+    check_display_guard(display, allow)
+}
+
 pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
     match cli.command {
         Command::Doctor => {
@@ -166,6 +203,7 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             out,
             cursor_track,
         } => {
+            ensure_safe_display(&display)?;
             let resolved = match (window, region) {
                 (Some(title), _) => appreels_capture::resolve_window(&title)?,
                 (_, Some(spec)) => parse_region(&spec)?,
@@ -293,6 +331,7 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             style_seed,
             keep_open,
         } => {
+            ensure_safe_display(&display)?;
             let style = match style_seed {
                 Some(seed) => polish_core::style_from_seed(seed),
                 None => polish_core::style_from_seed(default_seed()),
@@ -408,6 +447,7 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             style_seed,
             keep_open,
         } => {
+            ensure_safe_display(&display)?;
             let style = match style_seed {
                 Some(seed) => polish_core::style_from_seed(seed),
                 None => polish_core::style_from_seed(default_seed()),
@@ -1967,5 +2007,47 @@ mod tests {
         assert_eq!(timeline.captions.len(), 2);
         assert_eq!(timeline.zooms.len(), 2);
         assert_eq!((timeline.zooms[0].x, timeline.zooms[0].y), (300.0, 180.0));
+    }
+
+    #[test]
+    fn live_session_displays_are_detected() {
+        assert!(is_live_session_display(":0"));
+        assert!(is_live_session_display(":1"));
+        assert!(is_live_session_display(":0.0"));
+        assert!(is_live_session_display(":1.0"));
+        assert!(is_live_session_display("localhost:1"));
+        assert!(is_live_session_display("localhost:0.0"));
+    }
+
+    #[test]
+    fn isolated_displays_are_not_live() {
+        assert!(!is_live_session_display(":2"));
+        assert!(!is_live_session_display(":99"));
+        assert!(!is_live_session_display(":99.0"));
+    }
+
+    #[test]
+    fn unparseable_displays_are_treated_as_live() {
+        assert!(is_live_session_display(""));
+        assert!(is_live_session_display("nonsense"));
+        assert!(is_live_session_display(":abc"));
+    }
+
+    #[test]
+    fn display_guard_refuses_live_display_by_default() {
+        let err = check_display_guard(":1", false).expect_err("must refuse");
+        assert!(err.contains(":1"));
+        assert!(err.contains("APPREELS_ALLOW_LIVE_DISPLAY"));
+        assert!(err.contains("Xvfb") || err.contains("Xephyr"));
+    }
+
+    #[test]
+    fn display_guard_allows_live_display_with_override() {
+        assert!(check_display_guard(":1", true).is_ok());
+    }
+
+    #[test]
+    fn display_guard_allows_isolated_display() {
+        assert!(check_display_guard(":99", false).is_ok());
     }
 }
