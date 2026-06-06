@@ -129,8 +129,8 @@ const DEFAULT_TYPE_DELAY_MS: u32 = 55;
 const DEFAULT_STEP_SETTLE_MS: u32 = 600;
 const DEFAULT_STAGE_MARGIN: i32 = 72;
 const DEFAULT_ZOOM_SCALE: f64 = 1.25;
-const DEFAULT_INPUT_ZOOM_SCALE: f64 = 1.55;
-const DEFAULT_OUTPUT_ZOOM_SCALE: f64 = 1.35;
+const DEFAULT_INPUT_ZOOM_SCALE: f64 = 1.34;
+const DEFAULT_OUTPUT_ZOOM_SCALE: f64 = 1.22;
 const DEFAULT_BROWSER_WIDTH: u32 = 1180;
 const DEFAULT_BROWSER_HEIGHT: u32 = 760;
 const DEFAULT_BROWSER_STARTUP_MS: u32 = 1800;
@@ -315,6 +315,7 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 None
             };
             activate_window(&display, &terminal.window_id)?;
+            clear_terminal_screen(&display, &terminal.window_id)?;
             park_mouse(&display, region)?;
 
             let timeline = terminal_script.to_timeline(region);
@@ -363,7 +364,11 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
                 out.to_str().ok_or("output path must be valid UTF-8")?,
                 &style,
                 &timeline,
-                None,
+                Some(
+                    cursor_track
+                        .to_str()
+                        .ok_or("cursor track path must be valid UTF-8")?,
+                ),
             )?;
             let report = serde_json::json!({
                 "ok": true,
@@ -1285,7 +1290,7 @@ fn focus_point(focus: &TerminalFocus, region: appreels_capture::Region) -> (f64,
     let w = f64::from(region.width);
     let h = f64::from(region.height);
     match focus {
-        TerminalFocus::Input => (w * 0.30, h * 0.82),
+        TerminalFocus::Input => (w * 0.38, h * 0.68),
         TerminalFocus::Output => (w * 0.34, h * 0.42),
         TerminalFocus::Full | TerminalFocus::Center => (w * 0.50, h * 0.50),
         TerminalFocus::Coord { x, y } => (*x, *y),
@@ -1315,7 +1320,7 @@ fn launch_terminal(
     let shell = demo
         .shell
         .clone()
-        .unwrap_or_else(|| "bash --noprofile --norc".to_string());
+        .unwrap_or_else(|| "bash --noprofile --norc -i".to_string());
     let geometry = format!("{}x{}", demo.cols.unwrap_or(100), demo.rows.unwrap_or(28));
     let cwd = demo.cwd.clone().unwrap_or(std::env::current_dir()?);
 
@@ -1340,8 +1345,10 @@ fn launch_terminal(
             .arg("#000000")
             .arg("--color-text")
             .arg("#f2f2f2")
-            .arg("--command")
-            .arg(&shell)
+            .arg("--execute")
+            .arg("sh")
+            .arg("-lc")
+            .arg(format!("exec {shell}"))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()?;
@@ -1353,9 +1360,9 @@ fn launch_terminal(
             .arg(format!("--title={title}"))
             .arg(format!("--working-directory={}", cwd.to_string_lossy()))
             .arg("--")
-            .arg("bash")
+            .arg("sh")
             .arg("-lc")
-            .arg(shell)
+            .arg(format!("exec {shell}"))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()?;
@@ -1529,6 +1536,7 @@ fn wait_for_window(
 }
 
 fn activate_window(display: &str, window_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    run_xdotool(display, &["windowraise", window_id])?;
     run_xdotool(display, &["windowactivate", "--sync", window_id])?;
     Ok(())
 }
@@ -1594,6 +1602,17 @@ fn perform_terminal_steps(
         }
     }
     std::thread::sleep(Duration::from_millis(u64::from(demo.tail_ms())));
+    Ok(())
+}
+
+fn clear_terminal_screen(display: &str, window_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    activate_window(display, window_id)?;
+    std::thread::sleep(Duration::from_millis(250));
+    type_into_terminal(display, "clear", 12)?;
+    run_xdotool(display, &["key", "--clearmodifiers", "Return"])?;
+    std::thread::sleep(Duration::from_millis(250));
+    run_xdotool(display, &["key", "--clearmodifiers", "ctrl+l"])?;
+    std::thread::sleep(Duration::from_millis(150));
     Ok(())
 }
 

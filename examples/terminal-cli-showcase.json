@@ -9,9 +9,9 @@
   "tailMs": 2400,
   "typeDelayMs": 72,
   "settleMs": 1050,
-  "zoomScale": 1.22,
-  "inputZoomScale": 1.62,
-  "outputZoomScale": 1.28,
+  "zoomScale": 1.16,
+  "inputZoomScale": 1.34,
+  "outputZoomScale": 1.18,
   "outro": "Ready to share",
   "outroCardMs": 1300,
   "steps": [

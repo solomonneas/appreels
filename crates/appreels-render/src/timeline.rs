@@ -124,6 +124,9 @@ pub struct ZoomState {
     pub scale: f64,
 }
 
+const CONNECTED_ZOOM_GAP_MS: u32 = 1_600;
+const ZOOM_RAMP_FRACTION: f64 = 0.24;
+
 /// The eased zoom state at `t_ms`. Overlapping cues: last one wins. Adjacent
 /// cues transition camera target to camera target instead of returning to the
 /// full-window view between actions.
@@ -141,7 +144,7 @@ pub fn zoom_at(zooms: &[ZoomCue], t_ms: f64) -> Option<ZoomState> {
         cy: cue.y,
         scale: cue.scale,
     };
-    let ramp = 0.18_f64;
+    let ramp = ZOOM_RAMP_FRACTION;
     if p < ramp {
         let from = connected_previous_zoom(zooms, idx)
             .map(zoom_target)
@@ -172,14 +175,16 @@ pub fn zoom_at(zooms: &[ZoomCue], t_ms: f64) -> Option<ZoomState> {
 fn connected_previous_zoom(zooms: &[ZoomCue], idx: usize) -> Option<&ZoomCue> {
     let cue = &zooms[idx];
     zooms[..idx].iter().rev().find(|candidate| {
-        candidate.end_ms <= cue.start_ms && cue.start_ms.saturating_sub(candidate.end_ms) <= 700
+        candidate.end_ms <= cue.start_ms
+            && cue.start_ms.saturating_sub(candidate.end_ms) <= CONNECTED_ZOOM_GAP_MS
     })
 }
 
 fn connected_next_zoom(zooms: &[ZoomCue], idx: usize) -> Option<&ZoomCue> {
     let cue = &zooms[idx];
     zooms[idx + 1..].iter().find(|candidate| {
-        cue.end_ms <= candidate.start_ms && candidate.start_ms.saturating_sub(cue.end_ms) <= 700
+        cue.end_ms <= candidate.start_ms
+            && candidate.start_ms.saturating_sub(cue.end_ms) <= CONNECTED_ZOOM_GAP_MS
     })
 }
 
@@ -356,5 +361,29 @@ mod tests {
         let after_cut = zoom_at(&zooms, 1005.0).unwrap();
         assert!(before_cut.scale > 1.65);
         assert!(after_cut.scale > 1.65);
+    }
+
+    #[test]
+    fn nearby_zoom_cues_bridge_terminal_settle_gap() {
+        let zooms = vec![
+            ZoomCue {
+                start_ms: 0,
+                end_ms: 1000,
+                x: 50.0,
+                y: 60.0,
+                scale: 1.8,
+            },
+            ZoomCue {
+                start_ms: 2050,
+                end_ms: 3200,
+                x: 180.0,
+                y: 210.0,
+                scale: 1.5,
+            },
+        ];
+        let end = zoom_at(&zooms, 990.0).unwrap();
+        let start = zoom_at(&zooms, 2060.0).unwrap();
+        assert!(end.scale > 1.5);
+        assert!(start.scale > 1.4);
     }
 }
