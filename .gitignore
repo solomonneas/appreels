@@ -3,3 +3,7 @@
 /artifacts
 /.claude
 .superpowers/
+
+# Local brigade memory (cards are local-only, never committed)
+/memory/
+.brigade/
